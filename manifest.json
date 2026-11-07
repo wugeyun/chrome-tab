@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "武哥新标签页",
   "description": "长期固定网页卡片：一键添加当前页面，支持编辑与拖拽排序。",
-  "version": "1.6.0",
-  "permissions": ["storage", "tabs", "favicon", "bookmarks"],
+  "version": "1.6.1",
+  "permissions": ["storage", "tabs", "favicon"],
   "options_page": "options.html",
   "chrome_url_overrides": {
     "newtab": "newtab.html"
