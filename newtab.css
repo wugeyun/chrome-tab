@@ -12,6 +12,8 @@
   --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
   --font-body: "Avenir Next", Avenir, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", sans-serif;
+  --font-clock: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI Variable Display",
+    "Segoe UI", "Helvetica Neue", Arial, sans-serif;
 }
 
 * {
@@ -119,12 +121,10 @@ body {
 }
 
 .bm-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
+  position: fixed;
   z-index: 30;
   min-width: 200px;
-  max-width: 280px;
+  max-width: min(360px, calc(100vw - 16px));
   max-height: min(360px, 60vh);
   overflow: auto;
   padding: 6px;
@@ -152,15 +152,26 @@ body {
   white-space: nowrap;
 }
 
-.bm-menu-item:hover {
+.bm-menu-item:hover,
+.bm-menu-folder.open {
   background: rgba(31, 122, 108, 0.1);
 }
 
-.bm-menu-heading {
-  margin: 6px 8px 2px;
-  font-size: 0.72rem;
+.bm-menu-folder {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.84rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bm-chevron {
+  flex-shrink: 0;
+  margin-left: auto;
   color: var(--ink-soft);
-  letter-spacing: 0.04em;
 }
 
 .bm-menu-empty {
@@ -194,10 +205,11 @@ body {
 
 .clock {
   margin: 0;
-  font-family: var(--font-display);
-  font-weight: 500;
+  font-family: var(--font-clock);
+  font-weight: 300;
   font-size: clamp(3.4rem, 8vw, 5.6rem);
-  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
   line-height: 1;
 }
 

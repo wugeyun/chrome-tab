@@ -12,6 +12,10 @@ import {
 const grid = document.getElementById("card-grid");
 const emptyHint = document.getElementById("empty-hint");
 const bookmarksEl = document.getElementById("bookmarks");
+// 书签栏是横向滚动容器，会裁掉超出高度的内容，所以文件夹下拉菜单放到栏外的独立层里
+const bmMenuLayer = document.createElement("div");
+bmMenuLayer.className = "bm-menu-layer";
+document.body.append(bmMenuLayer);
 const creditEl = document.getElementById("credit");
 const dialog = document.getElementById("edit-dialog");
 const form = document.getElementById("edit-form");
@@ -336,6 +340,17 @@ async function render() {
   emptyHint.hidden = cards.length > 0;
 }
 
+const FOLDER_ICON =
+  '<svg class="bm-folder-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>';
+const CHEVRON_ICON =
+  '<svg class="bm-chevron" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M9.3 6.7a1 1 0 0 1 1.4 0l4.6 4.6a1 1 0 0 1 0 1.4l-4.6 4.6a1 1 0 1 1-1.4-1.4L13.2 12 9.3 8.1a1 1 0 0 1 0-1.4z"/></svg>';
+
+/**
+ * 当前展开的菜单，按层级排列：[0] 是书签栏文件夹的下拉菜单，[1] 是它的子菜单，依此类推
+ * @type {{ menu: HTMLElement, anchor: HTMLElement }[]}
+ */
+const openMenus = [];
+
 /** @param {chrome.bookmarks.BookmarkTreeNode} node */
 function createBookmarkItem(node) {
   if (node.url) {
@@ -357,6 +372,9 @@ function createBookmarkItem(node) {
     span.textContent = node.title || hostnameOf(node.url);
 
     a.append(img, span);
+    a.addEventListener("mouseenter", () => {
+      if (openMenus.length) closeAllBookmarkMenus();
+    });
     return a;
   }
 
@@ -367,46 +385,50 @@ function createBookmarkItem(node) {
   btn.type = "button";
   btn.className = "bm-item bm-folder-btn";
   btn.title = node.title || "文件夹";
-  btn.innerHTML =
-    '<svg class="bm-folder-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>';
+  btn.innerHTML = FOLDER_ICON;
   const label = document.createElement("span");
   label.textContent = node.title || "文件夹";
   btn.append(label);
 
+  /** @type {HTMLElement | null} */
+  let menu = null;
+  const open = () => {
+    menu ??= createBookmarkMenu(node, 0);
+    openBookmarkMenu(0, menu, wrap);
+  };
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (openMenus[0]?.anchor === wrap) closeAllBookmarkMenus();
+    else open();
+  });
+  // 已经有菜单展开时，鼠标移到别的文件夹上直接切换过去（和 Chrome 原生书签栏一致）
+  btn.addEventListener("mouseenter", () => {
+    if (openMenus.length && openMenus[0].anchor !== wrap) open();
+  });
+
+  wrap.append(btn);
+  return wrap;
+}
+
+/**
+ * 创建某个文件夹的菜单；子文件夹显示为带箭头的一行，展开时再按需创建下一级菜单
+ * @param {chrome.bookmarks.BookmarkTreeNode} folder
+ * @param {number} level
+ */
+function createBookmarkMenu(folder, level) {
   const menu = document.createElement("div");
   menu.className = "bm-menu";
   menu.hidden = true;
 
-  for (const child of node.children || []) {
+  for (const child of folder.children || []) {
     if (child.url) {
-      const link = document.createElement("a");
-      link.className = "bm-menu-item";
-      link.href = child.url;
-      link.title = child.title || child.url;
-
-      const img = document.createElement("img");
-      img.src = faviconUrl(child.url, 16);
-      img.alt = "";
-      img.draggable = false;
-
-      const span = document.createElement("span");
-      span.textContent = child.title || hostnameOf(child.url);
-      link.append(img, span);
+      const link = createBookmarkMenuLink(child);
+      // 鼠标移到普通书签上时，收起更深层的子菜单
+      link.addEventListener("mouseenter", () => closeBookmarkMenusFrom(level + 1));
       menu.append(link);
     } else if (child.children) {
-      // Nested folder: show as labeled group heading + links one level deep
-      const heading = document.createElement("div");
-      heading.className = "bm-menu-heading";
-      heading.textContent = child.title || "文件夹";
-      menu.append(heading);
-      for (const grand of child.children || []) {
-        if (!grand.url) continue;
-        const link = document.createElement("a");
-        link.className = "bm-menu-item";
-        link.href = grand.url;
-        link.textContent = grand.title || hostnameOf(grand.url);
-        menu.append(link);
-      }
+      menu.append(createBookmarkSubfolderRow(child, level));
     }
   }
 
@@ -417,28 +439,141 @@ function createBookmarkItem(node) {
     menu.append(empty);
   }
 
-  btn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const open = menu.hidden;
-    closeAllBookmarkMenus();
-    menu.hidden = !open;
-    wrap.classList.toggle("open", open);
+  menu.addEventListener("click", (e) => e.stopPropagation());
+  // 菜单自身滚动后子菜单会错位，直接收起
+  menu.addEventListener("scroll", () => closeBookmarkMenusFrom(level + 1));
+
+  bmMenuLayer.append(menu);
+  return menu;
+}
+
+/**
+ * 菜单里的子文件夹行：悬停或点击时在旁边弹出下一级菜单
+ * @param {chrome.bookmarks.BookmarkTreeNode} folder
+ * @param {number} level 这一行所在菜单的层级
+ */
+function createBookmarkSubfolderRow(folder, level) {
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "bm-menu-item bm-menu-folder";
+  row.title = folder.title || "文件夹";
+  row.innerHTML = FOLDER_ICON;
+  const span = document.createElement("span");
+  span.textContent = folder.title || "文件夹";
+  row.append(span);
+  row.insertAdjacentHTML("beforeend", CHEVRON_ICON);
+
+  /** @type {HTMLElement | null} */
+  let submenu = null;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let hoverTimer;
+  const open = () => {
+    clearTimeout(hoverTimer);
+    if (openMenus[level + 1]?.anchor === row) return;
+    submenu ??= createBookmarkMenu(folder, level + 1);
+    openBookmarkMenu(level + 1, submenu, row);
+  };
+
+  row.addEventListener("click", open);
+  // 稍微延迟再展开，鼠标斜着划过其他行时不会乱闪
+  row.addEventListener("mouseenter", () => {
+    hoverTimer = setTimeout(open, 120);
+  });
+  row.addEventListener("mouseleave", () => clearTimeout(hoverTimer));
+  return row;
+}
+
+/**
+ * 下拉菜单里的一条书签：图标 + 单行名称（过长显示省略号，悬停显示全名）
+ * @param {chrome.bookmarks.BookmarkTreeNode} node
+ */
+function createBookmarkMenuLink(node) {
+  const link = document.createElement("a");
+  link.className = "bm-menu-item";
+  link.href = node.url;
+  const name = node.title || hostnameOf(node.url);
+  link.title = node.title ? `${node.title}\n${node.url}` : node.url;
+
+  const img = document.createElement("img");
+  img.src = faviconUrl(node.url, 16);
+  img.alt = "";
+  img.draggable = false;
+  img.addEventListener("error", () => {
+    img.style.visibility = "hidden";
   });
 
-  wrap.append(btn, menu);
-  return wrap;
+  const span = document.createElement("span");
+  span.textContent = name;
+  link.append(img, span);
+  return link;
+}
+
+/**
+ * 在指定层级打开菜单：先收起这一层及更深的菜单，再显示并定位
+ * @param {number} level
+ * @param {HTMLElement} menu
+ * @param {HTMLElement} anchor 第 0 层是书签栏上的文件夹，其余是菜单里的子文件夹行
+ */
+function openBookmarkMenu(level, menu, anchor) {
+  closeBookmarkMenusFrom(level);
+  menu.hidden = false;
+  anchor.classList.add("open");
+  openMenus[level] = { menu, anchor };
+  if (level === 0) positionMenuBelow(menu, anchor);
+  else positionMenuBeside(menu, anchor);
+}
+
+/** @param {number} level 收起这一层及更深的菜单 */
+function closeBookmarkMenusFrom(level) {
+  while (openMenus.length > level) {
+    const { menu, anchor } = openMenus.pop();
+    menu.hidden = true;
+    anchor.classList.remove("open");
+  }
 }
 
 function closeAllBookmarkMenus() {
-  bookmarksEl.querySelectorAll(".bm-menu").forEach((el) => {
-    el.hidden = true;
-  });
-  bookmarksEl.querySelectorAll(".bm-folder.open").forEach((el) => {
-    el.classList.remove("open");
-  });
+  closeBookmarkMenusFrom(0);
+}
+
+const MENU_MARGIN = 8;
+
+/**
+ * @param {HTMLElement} menu
+ * @param {HTMLElement} anchor
+ */
+function positionMenuBelow(menu, anchor) {
+  const rect = anchor.getBoundingClientRect();
+  const maxLeft = window.innerWidth - menu.offsetWidth - MENU_MARGIN;
+  menu.style.left = `${Math.max(MENU_MARGIN, Math.min(rect.left, maxLeft))}px`;
+  menu.style.top = `${rect.bottom + 4}px`;
+}
+
+/**
+ * 子菜单放在右侧，右边放不下就放到左侧；上下超出窗口时往回挪
+ * @param {HTMLElement} menu
+ * @param {HTMLElement} anchor
+ */
+function positionMenuBeside(menu, anchor) {
+  const rect = anchor.getBoundingClientRect();
+  const width = menu.offsetWidth;
+  let left = rect.right + 2;
+  if (left + width > window.innerWidth - MENU_MARGIN) left = rect.left - width - 2;
+  left = Math.max(MENU_MARGIN, left);
+
+  const maxTop = window.innerHeight - menu.offsetHeight - MENU_MARGIN;
+  const top = Math.max(MENU_MARGIN, Math.min(rect.top - 6, maxTop));
+
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
 }
 
 document.addEventListener("click", () => closeAllBookmarkMenus());
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeAllBookmarkMenus();
+});
+bookmarksEl.addEventListener("scroll", () => closeAllBookmarkMenus());
+window.addEventListener("resize", () => closeAllBookmarkMenus());
 
 async function renderBookmarks() {
   try {
@@ -455,6 +590,8 @@ async function renderBookmarks() {
       (n) => n.url || (n.children && n.children.length >= 0)
     );
     bookmarksEl.hidden = false;
+    closeAllBookmarkMenus();
+    bmMenuLayer.replaceChildren();
     bookmarksEl.replaceChildren(...items.map(createBookmarkItem));
   } catch {
     bookmarksEl.hidden = true;
