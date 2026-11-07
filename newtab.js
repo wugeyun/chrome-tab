@@ -57,18 +57,21 @@ updateCredit();
 setInterval(tickClock, 1000);
 
 searchForm.addEventListener("submit", (event) => {
+  event.preventDefault();
   const q = searchInput.value.trim();
   if (!q) {
-    event.preventDefault();
     searchInput.focus();
     return;
   }
 
   if (/^(https?:\/\/|www\.)/i.test(q) || /^[\w-]+(\.[\w-]+)+([/:?#].*)?$/i.test(q)) {
-    event.preventDefault();
     const href = /^https?:\/\//i.test(q) ? q : `https://${q}`;
     location.href = href;
+    return;
   }
+
+  // Use the browser's default search engine
+  chrome.search.query({ text: q, disposition: "CURRENT_TAB" });
 });
 
 searchInput.focus();
