@@ -1,6 +1,50 @@
 /** Shared storage helpers for Fixed Cards New Tab. */
 
 const STORAGE_KEY = "cards";
+const THEME_KEY = "theme";
+
+/** @typedef {"light" | "dark" | "auto"} ThemeMode */
+
+const THEME_MODES = new Set(["light", "dark", "auto"]);
+
+/** @param {unknown} value @returns {ThemeMode} */
+export function normalizeTheme(value) {
+  return THEME_MODES.has(value) ? /** @type {ThemeMode} */ (value) : "auto";
+}
+
+/** @returns {Promise<ThemeMode>} */
+export async function getTheme() {
+  const data = await chrome.storage.local.get(THEME_KEY);
+  return normalizeTheme(data[THEME_KEY]);
+}
+
+/** @param {ThemeMode} mode */
+export async function setTheme(mode) {
+  const next = normalizeTheme(mode);
+  await chrome.storage.local.set({ [THEME_KEY]: next });
+  return next;
+}
+
+/**
+ * Apply theme to the document and keep it in sync with storage / system preference.
+ * @returns {Promise<() => void>} disposer
+ */
+export async function initTheme() {
+  const apply = (mode) => {
+    document.documentElement.dataset.theme = normalizeTheme(mode);
+  };
+
+  apply(await getTheme());
+
+  const onStorage = (changes, area) => {
+    if (area === "local" && changes[THEME_KEY]) {
+      apply(changes[THEME_KEY].newValue);
+    }
+  };
+  chrome.storage.onChanged.addListener(onStorage);
+
+  return () => chrome.storage.onChanged.removeListener(onStorage);
+}
 
 /**
  * @typedef {{ id: string, title: string, url: string, createdAt: number }} Card

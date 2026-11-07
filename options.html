@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="auto">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -12,6 +12,25 @@
         <h1>武哥新标签页</h1>
         <p class="lead">用分享链接在电脑之间迁移卡片</p>
       </header>
+
+      <section class="panel">
+        <h2>外观</h2>
+        <p class="desc">白天模式、黑夜模式，或跟随系统（与浏览器主题一致）。</p>
+        <div class="theme-modes" role="radiogroup" aria-label="外观模式">
+          <label class="theme-option">
+            <input type="radio" name="theme" value="light" />
+            <span>白天模式</span>
+          </label>
+          <label class="theme-option">
+            <input type="radio" name="theme" value="dark" />
+            <span>黑夜模式</span>
+          </label>
+          <label class="theme-option">
+            <input type="radio" name="theme" value="auto" checked />
+            <span>跟随系统</span>
+          </label>
+        </div>
+      </section>
 
       <section class="panel">
         <h2>当前卡片</h2>

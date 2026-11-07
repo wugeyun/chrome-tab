@@ -3,11 +3,14 @@ import {
   faviconUrl,
   getCards,
   hostnameOf,
+  initTheme,
   normalizeUrl,
   removeCard,
   reorderCards,
   updateCard,
 } from "./shared.js";
+
+initTheme();
 
 const grid = document.getElementById("card-grid");
 const emptyHint = document.getElementById("empty-hint");

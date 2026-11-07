@@ -1,4 +1,6 @@
-import { addCard, isRestrictedUrl } from "./shared.js";
+import { addCard, initTheme, isRestrictedUrl } from "./shared.js";
+
+initTheme();
 
 const titleInput = document.getElementById("title");
 const urlInput = document.getElementById("url");

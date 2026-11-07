@@ -3,10 +3,15 @@ import {
   buildShareUrl,
   extractShareToken,
   getCards,
+  getTheme,
   hostnameOf,
   importCards,
+  initTheme,
   parseShareUrl,
+  setTheme,
 } from "./shared.js";
+
+initTheme();
 
 const countEl = document.getElementById("count");
 const previewEl = document.getElementById("preview");
@@ -17,6 +22,7 @@ const copyBtn = document.getElementById("copy-btn");
 const importBtn = document.getElementById("import-btn");
 const importUrlEl = document.getElementById("import-url");
 const statusEl = document.getElementById("status");
+const themeInputs = document.querySelectorAll('input[name="theme"]');
 
 function setStatus(message, type) {
   if (!message) {
@@ -140,10 +146,6 @@ importBtn.addEventListener("click", async () => {
   }
 });
 
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.cards) refreshPreview();
-});
-
 async function bootFromHash() {
   if (!extractShareToken(location.hash)) return;
   importUrlEl.value = location.hash.startsWith("#wuge=")
@@ -157,5 +159,34 @@ async function bootFromHash() {
   }
 }
 
+async function syncThemeControls() {
+  const theme = await getTheme();
+  for (const input of themeInputs) {
+    input.checked = input.value === theme;
+  }
+}
+
+for (const input of themeInputs) {
+  input.addEventListener("change", async () => {
+    if (!input.checked) return;
+    await setTheme(input.value);
+    setStatus(
+      input.value === "light"
+        ? "已切换为白天模式。"
+        : input.value === "dark"
+          ? "已切换为黑夜模式。"
+          : "已切换为跟随系统。",
+      "ok"
+    );
+  });
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  if (changes.cards) refreshPreview();
+  if (changes.theme) syncThemeControls();
+});
+
+syncThemeControls();
 refreshPreview();
 bootFromHash();

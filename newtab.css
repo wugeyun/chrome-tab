@@ -1,20 +1,92 @@
-:root {
+:root,
+html[data-theme="light"] {
+  color-scheme: light;
   --ink: #16343a;
   --ink-soft: #3d6369;
   --paper: #f3f7f5;
   --panel: rgba(255, 255, 255, 0.72);
+  --surface: rgba(255, 255, 255, 0.92);
+  --surface-soft: rgba(255, 255, 255, 0.7);
+  --surface-strong: #fff;
+  --input-bg: #f8fbfa;
   --line: rgba(22, 52, 58, 0.12);
   --accent: #1f7a6c;
   --accent-deep: #14574d;
   --danger: #b42318;
+  --placeholder: #7a9196;
+  --credit: rgba(61, 99, 105, 0.55);
+  --hover-tint: rgba(22, 52, 58, 0.08);
+  --accent-tint: rgba(31, 122, 108, 0.1);
   --shadow: 0 18px 50px rgba(16, 48, 52, 0.12);
+  --menu-shadow: 0 12px 32px rgba(16, 48, 52, 0.16);
   --radius: 22px;
+  --atmosphere:
+    radial-gradient(ellipse 80% 55% at 12% -10%, rgba(95, 186, 168, 0.45), transparent 55%),
+    radial-gradient(ellipse 70% 50% at 90% 0%, rgba(236, 196, 120, 0.35), transparent 50%),
+    radial-gradient(ellipse 60% 45% at 50% 100%, rgba(92, 140, 168, 0.22), transparent 55%),
+    linear-gradient(165deg, #eef6f3 0%, #f7f3ea 48%, #e8f0f4 100%);
   --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
   --font-body: "Avenir Next", Avenir, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", sans-serif;
   /* 跨平台系统 UI 字体：Mac → SF，Windows → Segoe UI，Linux → 发行版默认无衬线 */
   --font-clock: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
     Arial, sans-serif;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #e6eef0;
+  --ink-soft: #9bb4b8;
+  --paper: #10181a;
+  --panel: rgba(24, 34, 36, 0.82);
+  --surface: rgba(36, 48, 50, 0.92);
+  --surface-soft: rgba(36, 48, 50, 0.72);
+  --surface-strong: #243032;
+  --input-bg: #1a2426;
+  --line: rgba(230, 238, 240, 0.12);
+  --accent: #3d9b8c;
+  --accent-deep: #6fc4b4;
+  --danger: #f07167;
+  --placeholder: #7f979b;
+  --credit: rgba(155, 180, 184, 0.55);
+  --hover-tint: rgba(230, 238, 240, 0.08);
+  --accent-tint: rgba(61, 155, 140, 0.16);
+  --shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+  --menu-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  --atmosphere:
+    radial-gradient(ellipse 80% 55% at 12% -10%, rgba(45, 120, 110, 0.35), transparent 55%),
+    radial-gradient(ellipse 70% 50% at 90% 0%, rgba(120, 90, 40, 0.22), transparent 50%),
+    radial-gradient(ellipse 60% 45% at 50% 100%, rgba(40, 80, 110, 0.28), transparent 55%),
+    linear-gradient(165deg, #121a1c 0%, #162022 48%, #10161a 100%);
+}
+
+@media (prefers-color-scheme: dark) {
+  html[data-theme="auto"] {
+    color-scheme: dark;
+    --ink: #e6eef0;
+    --ink-soft: #9bb4b8;
+    --paper: #10181a;
+    --panel: rgba(24, 34, 36, 0.82);
+    --surface: rgba(36, 48, 50, 0.92);
+    --surface-soft: rgba(36, 48, 50, 0.72);
+    --surface-strong: #243032;
+    --input-bg: #1a2426;
+    --line: rgba(230, 238, 240, 0.12);
+    --accent: #3d9b8c;
+    --accent-deep: #6fc4b4;
+    --danger: #f07167;
+    --placeholder: #7f979b;
+    --credit: rgba(155, 180, 184, 0.55);
+    --hover-tint: rgba(230, 238, 240, 0.08);
+    --accent-tint: rgba(61, 155, 140, 0.16);
+    --shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+    --menu-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+    --atmosphere:
+      radial-gradient(ellipse 80% 55% at 12% -10%, rgba(45, 120, 110, 0.35), transparent 55%),
+      radial-gradient(ellipse 70% 50% at 90% 0%, rgba(120, 90, 40, 0.22), transparent 50%),
+      radial-gradient(ellipse 60% 45% at 50% 100%, rgba(40, 80, 110, 0.28), transparent 55%),
+      linear-gradient(165deg, #121a1c 0%, #162022 48%, #10161a 100%);
+  }
 }
 
 * {
@@ -38,11 +110,7 @@ body {
   position: fixed;
   inset: 0;
   z-index: -1;
-  background:
-    radial-gradient(ellipse 80% 55% at 12% -10%, rgba(95, 186, 168, 0.45), transparent 55%),
-    radial-gradient(ellipse 70% 50% at 90% 0%, rgba(236, 196, 120, 0.35), transparent 50%),
-    radial-gradient(ellipse 60% 45% at 50% 100%, rgba(92, 140, 168, 0.22), transparent 55%),
-    linear-gradient(165deg, #eef6f3 0%, #f7f3ea 48%, #e8f0f4 100%);
+  background: var(--atmosphere);
   animation: drift 18s ease-in-out infinite alternate;
 }
 
@@ -65,7 +133,7 @@ body {
   min-height: 36px;
   padding: 4px 12px;
   overflow-x: auto;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--panel);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--line);
 }
@@ -95,7 +163,7 @@ body {
 
 .bm-item:hover,
 .bm-folder.open > .bm-folder-btn {
-  background: rgba(22, 52, 58, 0.08);
+  background: var(--hover-tint);
 }
 
 .bm-item span {
@@ -133,8 +201,8 @@ body {
   padding: 6px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
-  box-shadow: 0 12px 32px rgba(16, 48, 52, 0.16);
+  background: var(--surface-strong);
+  box-shadow: var(--menu-shadow);
 }
 
 .bm-menu-item {
@@ -156,7 +224,7 @@ body {
 }
 
 .bm-menu-item:hover {
-  background: rgba(31, 122, 108, 0.1);
+  background: var(--accent-tint);
 }
 
 .bm-menu-heading {
@@ -216,8 +284,8 @@ body {
   padding: 0 24px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 1px 6px rgba(22, 52, 58, 0.08);
+  background: var(--surface);
+  box-shadow: var(--shadow);
   color: var(--ink);
   font: inherit;
   font-size: 1rem;
@@ -226,7 +294,7 @@ body {
 }
 
 .search input::placeholder {
-  color: #7a9196;
+  color: var(--placeholder);
 }
 
 .search input:hover {
@@ -278,7 +346,7 @@ body {
 
 .ghost-btn {
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.55);
+  background: var(--surface-soft);
   color: var(--ink);
   padding: 0.55rem 1rem;
 }
@@ -319,7 +387,7 @@ body {
 }
 
 .card:hover {
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--surface-soft);
   border-color: var(--line);
 }
 
@@ -328,27 +396,27 @@ body {
   cursor: grabbing;
   opacity: 0.72;
   transform: scale(1.04);
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--surface);
   border-color: var(--accent);
-  box-shadow: 0 12px 28px rgba(22, 52, 58, 0.16);
+  box-shadow: var(--menu-shadow);
   z-index: 2;
 }
 
 .card.drag-over {
   border-color: var(--accent);
-  background: rgba(31, 122, 108, 0.08);
+  background: var(--accent-tint);
 }
 
 .card-icon {
   width: 56px;
   height: 56px;
   border-radius: 16px;
-  background: #fff;
+  background: var(--surface-strong);
   border: 1px solid var(--line);
   display: grid;
   place-items: center;
   overflow: hidden;
-  box-shadow: 0 8px 20px rgba(22, 52, 58, 0.08);
+  box-shadow: var(--shadow);
 }
 
 .card-icon img {
@@ -381,7 +449,7 @@ body {
   padding: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--surface);
   color: var(--ink-soft);
   cursor: pointer;
   opacity: 0;
@@ -400,7 +468,7 @@ body {
 
 .card-edit:hover {
   color: var(--accent-deep);
-  background: #fff;
+  background: var(--surface-strong);
   border-color: rgba(31, 122, 108, 0.35);
 }
 
@@ -408,7 +476,7 @@ body {
   font-size: 1.6rem;
   font-weight: 300;
   color: var(--ink-soft);
-  background: rgba(255, 255, 255, 0.55);
+  background: var(--surface-soft);
 }
 
 .hint {
@@ -424,7 +492,8 @@ body {
   padding: 0;
   width: min(420px, calc(100vw - 32px));
   box-shadow: var(--shadow);
-  background: #fff;
+  background: var(--surface-strong);
+  color: var(--ink);
 }
 
 .modal::backdrop {
@@ -457,7 +526,7 @@ body {
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 0.7rem 0.85rem;
-  background: #f8fbfa;
+  background: var(--input-bg);
 }
 
 .modal input:focus {
@@ -504,7 +573,7 @@ body {
   text-align: center;
   font-size: 0.75rem;
   letter-spacing: 0.06em;
-  color: rgba(61, 99, 105, 0.55);
+  color: var(--credit);
   user-select: none;
 }
 
