@@ -11,6 +11,7 @@ import {
 
 const grid = document.getElementById("card-grid");
 const emptyHint = document.getElementById("empty-hint");
+const bookmarksEl = document.getElementById("bookmarks");
 const creditEl = document.getElementById("credit");
 const dialog = document.getElementById("edit-dialog");
 const form = document.getElementById("edit-form");
@@ -335,11 +336,154 @@ async function render() {
   emptyHint.hidden = cards.length > 0;
 }
 
+/** @param {chrome.bookmarks.BookmarkTreeNode} node */
+function createBookmarkItem(node) {
+  if (node.url) {
+    const a = document.createElement("a");
+    a.className = "bm-item";
+    a.href = node.url;
+    a.title = node.title || node.url;
+
+    const img = document.createElement("img");
+    img.className = "bm-favicon";
+    img.src = faviconUrl(node.url, 16);
+    img.alt = "";
+    img.draggable = false;
+    img.addEventListener("error", () => {
+      img.style.visibility = "hidden";
+    });
+
+    const span = document.createElement("span");
+    span.textContent = node.title || hostnameOf(node.url);
+
+    a.append(img, span);
+    return a;
+  }
+
+  const wrap = document.createElement("div");
+  wrap.className = "bm-folder";
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "bm-item bm-folder-btn";
+  btn.title = node.title || "文件夹";
+  btn.innerHTML =
+    '<svg class="bm-folder-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>';
+  const label = document.createElement("span");
+  label.textContent = node.title || "文件夹";
+  btn.append(label);
+
+  const menu = document.createElement("div");
+  menu.className = "bm-menu";
+  menu.hidden = true;
+
+  for (const child of node.children || []) {
+    if (child.url) {
+      const link = document.createElement("a");
+      link.className = "bm-menu-item";
+      link.href = child.url;
+      link.title = child.title || child.url;
+
+      const img = document.createElement("img");
+      img.src = faviconUrl(child.url, 16);
+      img.alt = "";
+      img.draggable = false;
+
+      const span = document.createElement("span");
+      span.textContent = child.title || hostnameOf(child.url);
+      link.append(img, span);
+      menu.append(link);
+    } else if (child.children) {
+      // Nested folder: show as labeled group heading + links one level deep
+      const heading = document.createElement("div");
+      heading.className = "bm-menu-heading";
+      heading.textContent = child.title || "文件夹";
+      menu.append(heading);
+      for (const grand of child.children || []) {
+        if (!grand.url) continue;
+        const link = document.createElement("a");
+        link.className = "bm-menu-item";
+        link.href = grand.url;
+        link.textContent = grand.title || hostnameOf(grand.url);
+        menu.append(link);
+      }
+    }
+  }
+
+  if (!menu.childElementCount) {
+    const empty = document.createElement("div");
+    empty.className = "bm-menu-empty";
+    empty.textContent = "空文件夹";
+    menu.append(empty);
+  }
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = menu.hidden;
+    closeAllBookmarkMenus();
+    menu.hidden = !open;
+    wrap.classList.toggle("open", open);
+  });
+
+  wrap.append(btn, menu);
+  return wrap;
+}
+
+function closeAllBookmarkMenus() {
+  if (!bookmarksEl) return;
+  bookmarksEl.querySelectorAll(".bm-menu").forEach((el) => {
+    el.hidden = true;
+  });
+  bookmarksEl.querySelectorAll(".bm-folder.open").forEach((el) => {
+    el.classList.remove("open");
+  });
+}
+
+document.addEventListener("click", () => closeAllBookmarkMenus());
+
+/** Edge already treats extension NTP as NTP for the native favorites bar. */
+function isEdgeNativeFavorites() {
+  return /\bEdg\//.test(navigator.userAgent);
+}
+
+async function renderBookmarks() {
+  if (!bookmarksEl) return;
+  if (isEdgeNativeFavorites()) {
+    bookmarksEl.hidden = true;
+    return;
+  }
+  try {
+    const tree = await chrome.bookmarks.getTree();
+    const barId =
+      tree[0]?.children?.find((n) => n.id === "1")?.id ||
+      tree[0]?.children?.[0]?.id;
+    if (!barId) {
+      bookmarksEl.hidden = true;
+      return;
+    }
+    const [bar] = await chrome.bookmarks.getSubTree(barId);
+    const items = (bar.children || []).filter(
+      (n) => n.url || (n.children && n.children.length >= 0)
+    );
+    bookmarksEl.hidden = false;
+    bookmarksEl.replaceChildren(...items.map(createBookmarkItem));
+  } catch {
+    bookmarksEl.hidden = true;
+  }
+}
+
+chrome.bookmarks?.onCreated?.addListener(renderBookmarks);
+chrome.bookmarks?.onRemoved?.addListener(renderBookmarks);
+chrome.bookmarks?.onChanged?.addListener(renderBookmarks);
+chrome.bookmarks?.onMoved?.addListener(renderBookmarks);
+chrome.bookmarks?.onChildrenReordered?.addListener(renderBookmarks);
+
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.cards) render();
 });
 
 render();
+renderBookmarks();
 
 const params = new URLSearchParams(location.search);
 if (params.get("add") === "1") {
