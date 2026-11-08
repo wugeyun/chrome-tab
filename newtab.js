@@ -1,11 +1,14 @@
 import {
   addCard,
+  addSearchHistory,
   faviconUrl,
+  filterSearchHistory,
   getCards,
   hostnameOf,
   initTheme,
   normalizeUrl,
   removeCard,
+  removeSearchHistory,
   reorderCards,
   updateCard,
 } from "./shared.js";
@@ -26,6 +29,7 @@ const dialogDelete = document.getElementById("dialog-delete");
 const clockEl = document.getElementById("clock");
 const searchForm = document.getElementById("search-form");
 const searchInput = document.getElementById("search-input");
+const searchSuggest = document.getElementById("search-suggest");
 
 /** @type {string | null} */
 let editingId = null;
@@ -33,9 +37,15 @@ let editingId = null;
 let dragId = null;
 /** Suppress click after long-press / drag reorder */
 let suppressClick = false;
+/** @type {string[]} */
+let suggestItems = [];
+let activeSuggestIndex = -1;
+/** @type {ReturnType<typeof setTimeout> | null} */
+let suggestHideTimer = null;
 
 const LONG_PRESS_MS = 420;
 const MOVE_CANCEL_PX = 10;
+const SUGGEST_LIMIT = 8;
 
 function pad(n) {
   return String(n).padStart(2, "0");
@@ -56,13 +66,84 @@ tickClock();
 updateCredit();
 setInterval(tickClock, 1000);
 
-searchForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const q = searchInput.value.trim();
+function hideSuggest() {
+  if (suggestHideTimer) {
+    clearTimeout(suggestHideTimer);
+    suggestHideTimer = null;
+  }
+  searchSuggest.hidden = true;
+  searchSuggest.innerHTML = "";
+  suggestItems = [];
+  activeSuggestIndex = -1;
+  searchInput.setAttribute("aria-expanded", "false");
+  searchInput.removeAttribute("aria-activedescendant");
+}
+
+function setActiveSuggest(index) {
+  const options = [...searchSuggest.querySelectorAll('[role="option"]')];
+  options.forEach((el) => el.setAttribute("aria-selected", "false"));
+  activeSuggestIndex = index;
+  if (index < 0 || index >= options.length) {
+    searchInput.removeAttribute("aria-activedescendant");
+    return;
+  }
+  const option = options[index];
+  option.setAttribute("aria-selected", "true");
+  searchInput.setAttribute("aria-activedescendant", option.id);
+  option.scrollIntoView({ block: "nearest" });
+}
+
+function renderSuggest(items) {
+  suggestItems = items;
+  activeSuggestIndex = -1;
+  searchSuggest.innerHTML = "";
+
+  if (!items.length) {
+    hideSuggest();
+    return;
+  }
+
+  for (const [index, text] of items.entries()) {
+    const li = document.createElement("li");
+    li.id = `search-suggest-${index}`;
+    li.className = "search-suggest-item";
+    li.setAttribute("role", "option");
+    li.setAttribute("aria-selected", "false");
+
+    const pick = document.createElement("button");
+    pick.type = "button";
+    pick.className = "search-suggest-pick";
+    pick.textContent = text;
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "search-suggest-remove";
+    remove.setAttribute("aria-label", `删除「${text}」`);
+    remove.textContent = "×";
+
+    li.append(pick, remove);
+    searchSuggest.append(li);
+  }
+
+  searchSuggest.hidden = false;
+  searchInput.setAttribute("aria-expanded", "true");
+}
+
+async function refreshSuggest() {
+  const items = await filterSearchHistory(searchInput.value, SUGGEST_LIMIT);
+  if (document.activeElement !== searchInput) return;
+  renderSuggest(items);
+}
+
+function runSearch(raw) {
+  const q = raw.trim();
   if (!q) {
     searchInput.focus();
     return;
   }
+
+  hideSuggest();
+  void addSearchHistory(q);
 
   if (/^(https?:\/\/|www\.)/i.test(q) || /^[\w-]+(\.[\w-]+)+([/:?#].*)?$/i.test(q)) {
     const href = /^https?:\/\//i.test(q) ? q : `https://${q}`;
@@ -70,8 +151,78 @@ searchForm.addEventListener("submit", (event) => {
     return;
   }
 
-  // Use the browser's default search engine
   chrome.search.query({ text: q, disposition: "CURRENT_TAB" });
+}
+
+searchForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (activeSuggestIndex >= 0 && suggestItems[activeSuggestIndex]) {
+    runSearch(suggestItems[activeSuggestIndex]);
+    return;
+  }
+  runSearch(searchInput.value);
+});
+
+searchInput.addEventListener("input", () => {
+  void refreshSuggest();
+});
+
+searchInput.addEventListener("focus", () => {
+  if (suggestHideTimer) {
+    clearTimeout(suggestHideTimer);
+    suggestHideTimer = null;
+  }
+  void refreshSuggest();
+});
+
+searchInput.addEventListener("blur", () => {
+  suggestHideTimer = setTimeout(hideSuggest, 120);
+});
+
+searchInput.addEventListener("keydown", (event) => {
+  if (searchSuggest.hidden || !suggestItems.length) {
+    if (event.key === "Escape") hideSuggest();
+    return;
+  }
+
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    setActiveSuggest((activeSuggestIndex + 1) % suggestItems.length);
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    setActiveSuggest(
+      activeSuggestIndex <= 0 ? suggestItems.length - 1 : activeSuggestIndex - 1
+    );
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    hideSuggest();
+  }
+});
+
+searchSuggest.addEventListener("mousedown", (event) => {
+  event.preventDefault();
+});
+
+searchSuggest.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+
+  const removeBtn = target.closest(".search-suggest-remove");
+  if (removeBtn) {
+    const item = removeBtn.closest(".search-suggest-item");
+    const text = item?.querySelector(".search-suggest-pick")?.textContent || "";
+    if (text) {
+      await removeSearchHistory(text);
+      await refreshSuggest();
+      searchInput.focus();
+    }
+    return;
+  }
+
+  const pickBtn = target.closest(".search-suggest-pick");
+  if (pickBtn) {
+    runSearch(pickBtn.textContent || "");
+  }
 });
 
 searchInput.focus();

@@ -2,6 +2,8 @@
 
 const STORAGE_KEY = "cards";
 const THEME_KEY = "theme";
+const SEARCH_HISTORY_KEY = "searchHistory";
+const SEARCH_HISTORY_LIMIT = 20;
 
 /** @typedef {"light" | "dark" | "auto"} ThemeMode */
 
@@ -49,6 +51,50 @@ export async function initTheme() {
 /**
  * @typedef {{ id: string, title: string, url: string, createdAt: number }} Card
  */
+
+/** @returns {Promise<string[]>} */
+export async function getSearchHistory() {
+  const data = await chrome.storage.local.get(SEARCH_HISTORY_KEY);
+  const list = data[SEARCH_HISTORY_KEY];
+  return Array.isArray(list) ? list.filter((q) => typeof q === "string" && q.trim()) : [];
+}
+
+/** @param {string} query */
+export async function addSearchHistory(query) {
+  const q = query.trim();
+  if (!q) return getSearchHistory();
+
+  const prev = await getSearchHistory();
+  const next = [q, ...prev.filter((item) => item.toLowerCase() !== q.toLowerCase())].slice(
+    0,
+    SEARCH_HISTORY_LIMIT
+  );
+  await chrome.storage.local.set({ [SEARCH_HISTORY_KEY]: next });
+  return next;
+}
+
+/** @param {string} query */
+export async function removeSearchHistory(query) {
+  const q = query.trim().toLowerCase();
+  const prev = await getSearchHistory();
+  const next = prev.filter((item) => item.toLowerCase() !== q);
+  await chrome.storage.local.set({ [SEARCH_HISTORY_KEY]: next });
+  return next;
+}
+
+/**
+ * @param {string} query
+ * @param {number} [limit=8]
+ * @returns {Promise<string[]>}
+ */
+export async function filterSearchHistory(query, limit = 8) {
+  const needle = query.trim().toLowerCase();
+  const list = await getSearchHistory();
+  const matched = needle
+    ? list.filter((item) => item.toLowerCase().includes(needle))
+    : list;
+  return matched.slice(0, limit);
+}
 
 /** @returns {Promise<Card[]>} */
 export async function getCards() {

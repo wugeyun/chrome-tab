@@ -14,15 +14,27 @@
       <header class="hero">
         <h1 class="clock" id="clock">--:--</h1>
         <form class="search" id="search-form" role="search">
-          <input
-            type="search"
-            id="search-input"
-            name="q"
-            placeholder="搜索或输入网址"
-            autocomplete="off"
-            enterkeyhint="search"
-            aria-label="搜索"
-          />
+          <div class="search-wrap">
+            <input
+              type="search"
+              id="search-input"
+              name="q"
+              placeholder="搜索或输入网址"
+              autocomplete="off"
+              enterkeyhint="search"
+              aria-label="搜索"
+              aria-autocomplete="list"
+              aria-controls="search-suggest"
+              aria-expanded="false"
+            />
+            <ul
+              class="search-suggest"
+              id="search-suggest"
+              role="listbox"
+              aria-label="最近搜索"
+              hidden
+            ></ul>
+          </div>
         </form>
       </header>
 
