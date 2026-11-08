@@ -96,6 +96,25 @@ export async function filterSearchHistory(query, limit = 8) {
   return matched.slice(0, limit);
 }
 
+/**
+ * Bing OpenSearch-style suggestions: ["query", ["a", "b", ...]]
+ * @param {string} query
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<string[]>}
+ */
+export async function fetchBingSuggestions(query, signal) {
+  const q = query.trim();
+  if (!q) return [];
+
+  const url = `https://api.bing.com/osjson.aspx?query=${encodeURIComponent(q)}`;
+  const res = await fetch(url, { signal, credentials: "omit" });
+  if (!res.ok) return [];
+
+  const data = await res.json();
+  const list = Array.isArray(data) && Array.isArray(data[1]) ? data[1] : [];
+  return list.filter((item) => typeof item === "string" && item.trim());
+}
+
 /** @returns {Promise<Card[]>} */
 export async function getCards() {
   const data = await chrome.storage.local.get(STORAGE_KEY);

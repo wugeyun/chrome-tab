@@ -2,6 +2,7 @@ import {
   addCard,
   addSearchHistory,
   faviconUrl,
+  fetchBingSuggestions,
   filterSearchHistory,
   getCards,
   hostnameOf,
@@ -37,15 +38,24 @@ let editingId = null;
 let dragId = null;
 /** Suppress click after long-press / drag reorder */
 let suppressClick = false;
-/** @type {string[]} */
+/** @typedef {{ text: string, source: "history" | "bing" }} SuggestItem */
+
+/** @type {SuggestItem[]} */
 let suggestItems = [];
 let activeSuggestIndex = -1;
 /** @type {ReturnType<typeof setTimeout> | null} */
 let suggestHideTimer = null;
+/** @type {ReturnType<typeof setTimeout> | null} */
+let suggestDebounceTimer = null;
+/** @type {AbortController | null} */
+let suggestAbort = null;
+/** @type {number} */
+let suggestRequestId = 0;
 
 const LONG_PRESS_MS = 420;
 const MOVE_CANCEL_PX = 10;
 const SUGGEST_LIMIT = 8;
+const SUGGEST_DEBOUNCE_MS = 180;
 
 function pad(n) {
   return String(n).padStart(2, "0");
@@ -71,6 +81,12 @@ function hideSuggest() {
     clearTimeout(suggestHideTimer);
     suggestHideTimer = null;
   }
+  if (suggestDebounceTimer) {
+    clearTimeout(suggestDebounceTimer);
+    suggestDebounceTimer = null;
+  }
+  suggestAbort?.abort();
+  suggestAbort = null;
   searchSuggest.hidden = true;
   searchSuggest.innerHTML = "";
   suggestItems = [];
@@ -93,35 +109,43 @@ function setActiveSuggest(index) {
   option.scrollIntoView({ block: "nearest" });
 }
 
+/** @param {SuggestItem[]} items */
 function renderSuggest(items) {
   suggestItems = items;
   activeSuggestIndex = -1;
   searchSuggest.innerHTML = "";
 
   if (!items.length) {
-    hideSuggest();
+    searchSuggest.hidden = true;
+    searchInput.setAttribute("aria-expanded", "false");
+    searchInput.removeAttribute("aria-activedescendant");
     return;
   }
 
-  for (const [index, text] of items.entries()) {
+  for (const [index, item] of items.entries()) {
     const li = document.createElement("li");
     li.id = `search-suggest-${index}`;
     li.className = "search-suggest-item";
+    li.dataset.source = item.source;
     li.setAttribute("role", "option");
     li.setAttribute("aria-selected", "false");
 
     const pick = document.createElement("button");
     pick.type = "button";
     pick.className = "search-suggest-pick";
-    pick.textContent = text;
+    pick.textContent = item.text;
 
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "search-suggest-remove";
-    remove.setAttribute("aria-label", `删除「${text}」`);
-    remove.textContent = "×";
+    li.append(pick);
 
-    li.append(pick, remove);
+    if (item.source === "history") {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "search-suggest-remove";
+      remove.setAttribute("aria-label", `删除「${item.text}」`);
+      remove.textContent = "×";
+      li.append(remove);
+    }
+
     searchSuggest.append(li);
   }
 
@@ -129,10 +153,66 @@ function renderSuggest(items) {
   searchInput.setAttribute("aria-expanded", "true");
 }
 
+/**
+ * @param {string[]} history
+ * @param {string[]} remote
+ * @returns {SuggestItem[]}
+ */
+function mergeSuggest(history, remote) {
+  /** @type {SuggestItem[]} */
+  const merged = [];
+  const seen = new Set();
+
+  for (const text of history) {
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push({ text, source: "history" });
+    if (merged.length >= SUGGEST_LIMIT) return merged;
+  }
+
+  for (const text of remote) {
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push({ text, source: "bing" });
+    if (merged.length >= SUGGEST_LIMIT) break;
+  }
+
+  return merged;
+}
+
 async function refreshSuggest() {
-  const items = await filterSearchHistory(searchInput.value, SUGGEST_LIMIT);
-  if (document.activeElement !== searchInput) return;
-  renderSuggest(items);
+  const requestId = ++suggestRequestId;
+  const query = searchInput.value;
+  const history = await filterSearchHistory(query, SUGGEST_LIMIT);
+  if (requestId !== suggestRequestId || document.activeElement !== searchInput) return;
+
+  const historyItems = mergeSuggest(history, []);
+  renderSuggest(historyItems);
+
+  const q = query.trim();
+  if (!q) return;
+
+  suggestAbort?.abort();
+  const controller = new AbortController();
+  suggestAbort = controller;
+
+  try {
+    const remote = await fetchBingSuggestions(q, controller.signal);
+    if (requestId !== suggestRequestId || document.activeElement !== searchInput) return;
+    renderSuggest(mergeSuggest(history, remote));
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") return;
+  }
+}
+
+function scheduleSuggestRefresh() {
+  if (suggestDebounceTimer) clearTimeout(suggestDebounceTimer);
+  suggestDebounceTimer = setTimeout(() => {
+    suggestDebounceTimer = null;
+    void refreshSuggest();
+  }, SUGGEST_DEBOUNCE_MS);
 }
 
 function runSearch(raw) {
@@ -157,14 +237,14 @@ function runSearch(raw) {
 searchForm.addEventListener("submit", (event) => {
   event.preventDefault();
   if (activeSuggestIndex >= 0 && suggestItems[activeSuggestIndex]) {
-    runSearch(suggestItems[activeSuggestIndex]);
+    runSearch(suggestItems[activeSuggestIndex].text);
     return;
   }
   runSearch(searchInput.value);
 });
 
 searchInput.addEventListener("input", () => {
-  void refreshSuggest();
+  scheduleSuggestRefresh();
 });
 
 searchInput.addEventListener("focus", () => {

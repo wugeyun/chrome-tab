@@ -130,6 +130,8 @@ body {
 }
 
 .hero {
+  position: relative;
+  z-index: 5;
   text-align: center;
   margin-bottom: 40px;
   animation: rise 0.7s ease both;
@@ -195,7 +197,7 @@ body {
 
 .search-suggest {
   position: absolute;
-  z-index: 20;
+  z-index: 30;
   top: calc(100% + 8px);
   left: 0;
   right: 0;
@@ -262,6 +264,8 @@ body {
 }
 
 .board {
+  position: relative;
+  z-index: 1;
   background: var(--panel);
   backdrop-filter: blur(16px);
   border: 1px solid var(--line);
