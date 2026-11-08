@@ -15,9 +15,15 @@ Chrome 原生「添加快捷方式」需要手动填写名称和网址，且无�
 
 > 说明：Edge 在「仅在新标签页显示」下，扩展新标签页仍可正常显示原生收藏夹栏。Chrome 对扩展新标签页通常不认「仅新标签页」，若需要原生栏可见，请在 Chrome 里选「一律显示」。
 
-## 安装（开发者模式）
+## 安装
 
-1. 打开 Chrome，进入 `chrome://extensions`
+### Edge 应用商店（推荐）
+
+在 [Microsoft Edge 加载项](https://microsoftedge.microsoft.com/addons/detail/%E6%AD%A6%E5%93%A5%E6%96%B0%E6%A0%87%E7%AD%BE%E9%A1%B5/beoomipjlkihfgbjdfmikmpiooipdkmk) 一键安装「武哥新标签页」。
+
+### 开发者模式（Chrome / Edge）
+
+1. 打开浏览器，进入 `chrome://extensions` 或 `edge://extensions`
 2. 右上角打开「开发者模式」
 3. 点击「加载已解压的扩展程序」
 4. 选择本仓库目录（克隆后的 `chrome-tab` 文件夹）
