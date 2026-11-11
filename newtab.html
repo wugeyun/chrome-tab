@@ -15,6 +15,22 @@
         <h1 class="clock" id="clock">--:--</h1>
         <form class="search" id="search-form" role="search">
           <div class="search-wrap">
+            <button
+              type="button"
+              class="bookmark-btn"
+              id="bookmark-btn"
+              aria-label="书签"
+              aria-expanded="false"
+              aria-controls="bookmark-panel"
+              title="书签"
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M17 3H7a2 2 0 0 0-2 2v16l7-3 7 3V5a2 2 0 0 0-2-2zm0 15.43-5-2.14-5 2.14V5h10v13.43z"
+                />
+              </svg>
+            </button>
             <input
               type="search"
               id="search-input"
@@ -34,6 +50,26 @@
               aria-label="搜索建议"
               hidden
             ></ul>
+            <div
+              class="bookmark-panel"
+              id="bookmark-panel"
+              role="dialog"
+              aria-label="书签"
+              hidden
+            >
+              <div class="bookmark-panel-head">
+                <span class="bookmark-panel-title">书签</span>
+                <input
+                  type="search"
+                  class="bookmark-search"
+                  id="bookmark-search"
+                  placeholder="搜索名称或网址"
+                  autocomplete="off"
+                  aria-label="搜索书签"
+                />
+              </div>
+              <div class="bookmark-tree" id="bookmark-tree"></div>
+            </div>
           </div>
         </form>
       </header>
