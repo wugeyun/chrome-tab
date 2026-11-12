@@ -193,10 +193,35 @@ body {
   color: var(--accent-deep);
 }
 
+.search-submit {
+  position: absolute;
+  z-index: 2;
+  right: 8px;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.search-submit:hover {
+  background: var(--accent-tint);
+  color: var(--accent-deep);
+}
+
 .search #search-input {
   width: 100%;
   height: 52px;
-  padding: 0 24px 0 52px;
+  padding: 0 52px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--surface);
@@ -289,73 +314,29 @@ body {
   opacity: 1;
 }
 
+.search-wrap[data-mode="bookmark"] .search-submit {
+  color: var(--accent-deep);
+}
+
 .bookmark-panel {
   position: absolute;
   z-index: 31;
   top: calc(100% + 8px);
   left: 0;
   right: 0;
-  flex-direction: column;
   max-height: min(420px, 58vh);
+  margin: 0;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: 18px;
   background: var(--surface-strong);
   box-shadow: var(--menu-shadow);
   text-align: left;
-  overflow: hidden;
-}
-
-.bookmark-panel:not([hidden]) {
-  display: flex;
-}
-
-.bookmark-panel-head {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px 8px;
-}
-
-.bookmark-panel-title {
-  flex: none;
-  color: var(--ink-soft);
-  font-size: 0.82rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-}
-
-#bookmark-search {
-  flex: none;
-  width: 148px;
-  height: 24px;
-  margin: 0;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--input-bg);
-  box-shadow: none;
-  color: var(--ink);
-  font: inherit;
-  font-size: 0.88rem;
-  outline: none;
-}
-
-#bookmark-search::placeholder {
-  color: var(--placeholder);
-}
-
-#bookmark-search:hover,
-#bookmark-search:focus {
-  border-color: rgba(31, 122, 108, 0.35);
-  box-shadow: 0 0 0 3px rgba(31, 122, 108, 0.12);
+  overflow: auto;
 }
 
 .bookmark-tree {
-  flex: 1;
   margin: 0;
-  padding: 0 8px 10px;
-  overflow: auto;
 }
 
 .bookmark-tree ul {

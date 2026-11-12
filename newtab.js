@@ -29,12 +29,16 @@ const dialogCancel = document.getElementById("dialog-cancel");
 const dialogDelete = document.getElementById("dialog-delete");
 const clockEl = document.getElementById("clock");
 const searchForm = document.getElementById("search-form");
+const searchWrap = document.querySelector(".search-wrap");
 const searchInput = document.getElementById("search-input");
 const searchSuggest = document.getElementById("search-suggest");
+const searchSubmit = document.getElementById("search-submit");
 const bookmarkBtn = document.getElementById("bookmark-btn");
 const bookmarkPanel = document.getElementById("bookmark-panel");
 const bookmarkTree = document.getElementById("bookmark-tree");
-const bookmarkSearch = document.getElementById("bookmark-search");
+
+const SEARCH_PLACEHOLDER = "搜索或输入网址";
+const BOOKMARK_PLACEHOLDER = "搜索书签…";
 
 /** @type {string | null} */
 let editingId = null;
@@ -55,6 +59,9 @@ let suggestDebounceTimer = null;
 let suggestAbort = null;
 /** @type {number} */
 let suggestRequestId = 0;
+let bookmarkMode = false;
+/** 进入书签模式前暂存的网页搜索内容 */
+let savedSearchValue = "";
 /** @type {chrome.bookmarks.BookmarkTreeNode[] | null} */
 let bookmarkRoots = null;
 /** @type {Promise<chrome.bookmarks.BookmarkTreeNode[]> | null} */
@@ -199,6 +206,8 @@ function mergeSuggest(history, remote) {
 }
 
 async function refreshSuggest() {
+  if (bookmarkMode) return;
+
   const requestId = ++suggestRequestId;
   const query = searchInput.value;
   const q = query.trim();
@@ -210,7 +219,9 @@ async function refreshSuggest() {
   }
 
   const history = await filterSearchHistory(query, SUGGEST_LIMIT);
-  if (requestId !== suggestRequestId || document.activeElement !== searchInput) return;
+  if (requestId !== suggestRequestId || bookmarkMode || document.activeElement !== searchInput) {
+    return;
+  }
 
   const historyItems = mergeSuggest(history, []);
   renderSuggest(historyItems);
@@ -221,7 +232,9 @@ async function refreshSuggest() {
 
   try {
     const remote = await fetchBingSuggestions(q, controller.signal);
-    if (requestId !== suggestRequestId || document.activeElement !== searchInput) return;
+    if (requestId !== suggestRequestId || bookmarkMode || document.activeElement !== searchInput) {
+      return;
+    }
     renderSuggest(mergeSuggest(history, remote));
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") return;
@@ -255,8 +268,21 @@ function runSearch(raw) {
   chrome.search.query({ text: q, disposition: "CURRENT_TAB" });
 }
 
+function openFirstBookmarkResult() {
+  const first = bookmarkTree?.querySelector(".bookmark-row[data-url]");
+  const url = first instanceof HTMLElement ? first.dataset.url : "";
+  if (!url) return false;
+  exitBookmarkMode({ restoreSearch: false });
+  location.href = url;
+  return true;
+}
+
 searchForm.addEventListener("submit", (event) => {
   event.preventDefault();
+  if (bookmarkMode) {
+    openFirstBookmarkResult();
+    return;
+  }
   if (activeSuggestIndex >= 0 && suggestItems[activeSuggestIndex]) {
     runSearch(suggestItems[activeSuggestIndex].text);
     return;
@@ -265,6 +291,10 @@ searchForm.addEventListener("submit", (event) => {
 });
 
 searchInput.addEventListener("input", () => {
+  if (bookmarkMode) {
+    scheduleBookmarkSearch();
+    return;
+  }
   scheduleSuggestRefresh();
 });
 
@@ -273,18 +303,29 @@ searchInput.addEventListener("focus", () => {
     clearTimeout(suggestHideTimer);
     suggestHideTimer = null;
   }
-  hideBookmarkPanel();
+  if (bookmarkMode) {
+    void refreshBookmarkPanelContent();
+    return;
+  }
   void refreshSuggest();
 });
 
 searchInput.addEventListener("blur", () => {
+  if (bookmarkMode) return;
   suggestHideTimer = setTimeout(hideSuggest, 120);
 });
 
 searchInput.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !bookmarkPanel.hidden) {
-    event.preventDefault();
-    hideBookmarkPanel();
+  if (bookmarkMode) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (searchInput.value) {
+        searchInput.value = "";
+        void refreshBookmarkPanelContent();
+        return;
+      }
+      exitBookmarkMode();
+    }
     return;
   }
 
@@ -333,14 +374,58 @@ searchSuggest.addEventListener("click", async (event) => {
   }
 });
 
-function hideBookmarkPanel() {
+function applySearchChrome() {
+  searchInput.placeholder = SEARCH_PLACEHOLDER;
+  searchInput.setAttribute("aria-label", "搜索");
+  searchInput.setAttribute("aria-controls", "search-suggest");
+  searchInput.setAttribute("enterkeyhint", "search");
+  if (searchSubmit) {
+    searchSubmit.setAttribute("aria-label", "搜索");
+    searchSubmit.title = "搜索";
+  }
+  searchWrap?.removeAttribute("data-mode");
+}
+
+function applyBookmarkChrome() {
+  searchInput.placeholder = BOOKMARK_PLACEHOLDER;
+  searchInput.setAttribute("aria-label", "搜索书签");
+  searchInput.setAttribute("aria-controls", "bookmark-panel");
+  searchInput.setAttribute("enterkeyhint", "go");
+  if (searchSubmit) {
+    searchSubmit.setAttribute("aria-label", "打开匹配书签");
+    searchSubmit.title = "打开匹配书签";
+  }
+  searchWrap?.setAttribute("data-mode", "bookmark");
+}
+
+/**
+ * @param {{ restoreSearch?: boolean }} [options]
+ */
+function exitBookmarkMode(options = {}) {
+  const restoreSearch = options.restoreSearch !== false;
   if (!bookmarkPanel || !bookmarkBtn) return;
+
+  bookmarkMode = false;
   bookmarkPanel.hidden = true;
   bookmarkBtn.setAttribute("aria-expanded", "false");
   if (bookmarkSearchTimer) {
     clearTimeout(bookmarkSearchTimer);
     bookmarkSearchTimer = null;
   }
+
+  applySearchChrome();
+  if (restoreSearch) {
+    searchInput.value = savedSearchValue;
+  }
+  savedSearchValue = "";
+  if (document.activeElement === searchInput) {
+    void refreshSuggest();
+  }
+}
+
+function hideBookmarkPanel() {
+  if (!bookmarkMode) return;
+  exitBookmarkMode();
 }
 
 function isBookmarkFolder(node) {
@@ -503,21 +588,22 @@ async function loadBookmarkTree(force = false) {
 }
 
 async function refreshBookmarkPanelContent() {
-  const query = bookmarkSearch.value.trim();
+  if (!bookmarkMode || !bookmarkTree) return;
+  const query = searchInput.value.trim();
 
   try {
     if (!query) {
       const tree = await loadBookmarkTree();
-      if (!bookmarkPanel.hidden) renderBookmarkTree(tree);
+      if (bookmarkMode) renderBookmarkTree(tree);
       return;
     }
 
     const requestId = ++bookmarkSearchRequestId;
     const results = await chrome.bookmarks.search(query);
-    if (requestId !== bookmarkSearchRequestId || bookmarkPanel.hidden) return;
+    if (requestId !== bookmarkSearchRequestId || !bookmarkMode) return;
     renderBookmarkSearchResults(results, query);
   } catch {
-    if (bookmarkPanel.hidden) return;
+    if (!bookmarkMode) return;
     bookmarkTree.innerHTML = "";
     const empty = document.createElement("p");
     empty.className = "bookmark-empty";
@@ -534,51 +620,38 @@ function scheduleBookmarkSearch() {
   }, BOOKMARK_SEARCH_DEBOUNCE_MS);
 }
 
-async function showBookmarkPanel() {
+async function enterBookmarkMode() {
+  if (!bookmarkPanel || !bookmarkBtn || !bookmarkTree) return;
+
   hideSuggest();
+  savedSearchValue = searchInput.value;
+  searchInput.value = "";
   openBookmarkFolders.clear();
-  bookmarkSearch.value = "";
+  bookmarkMode = true;
+  applyBookmarkChrome();
   bookmarkPanel.hidden = false;
   bookmarkBtn.setAttribute("aria-expanded", "true");
   await refreshBookmarkPanelContent();
-  bookmarkSearch.focus();
+  searchInput.focus();
 }
 
-async function toggleBookmarkPanel() {
-  if (bookmarkPanel.hidden) {
-    await showBookmarkPanel();
-  } else {
-    hideBookmarkPanel();
+async function toggleBookmarkMode() {
+  if (bookmarkMode) {
+    exitBookmarkMode();
+    searchInput.focus();
+    return;
   }
+  await enterBookmarkMode();
 }
 
-if (bookmarkBtn && bookmarkPanel && bookmarkTree && bookmarkSearch) {
+if (bookmarkBtn && bookmarkPanel && bookmarkTree) {
   bookmarkBtn.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    void toggleBookmarkPanel();
-  });
-
-  bookmarkSearch.addEventListener("input", () => {
-    scheduleBookmarkSearch();
-  });
-
-  bookmarkSearch.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      if (bookmarkSearch.value) {
-        bookmarkSearch.value = "";
-        void refreshBookmarkPanelContent();
-        return;
-      }
-      hideBookmarkPanel();
-    }
+    void toggleBookmarkMode();
   });
 
   bookmarkPanel.addEventListener("mousedown", (event) => {
-    const target = event.target;
-    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
     event.preventDefault();
   });
 
@@ -603,28 +676,34 @@ if (bookmarkBtn && bookmarkPanel && bookmarkTree && bookmarkSearch) {
 
     const url = row.dataset.url;
     if (url) {
-      hideBookmarkPanel();
+      exitBookmarkMode({ restoreSearch: false });
       location.href = url;
     }
   });
 
   document.addEventListener("click", (event) => {
-    if (bookmarkPanel.hidden) return;
+    if (!bookmarkMode) return;
     const target = event.target;
     if (!(target instanceof Node)) return;
-    if (bookmarkPanel.contains(target) || bookmarkBtn.contains(target)) return;
-    hideBookmarkPanel();
+    if (
+      bookmarkPanel.contains(target) ||
+      bookmarkBtn.contains(target) ||
+      searchInput.contains(target) ||
+      searchSubmit?.contains(target)
+    ) {
+      return;
+    }
+    exitBookmarkMode();
   });
 
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !bookmarkPanel.hidden) {
-      if (document.activeElement === bookmarkSearch && bookmarkSearch.value) return;
-      hideBookmarkPanel();
+    if (event.key === "Escape" && bookmarkMode && document.activeElement !== searchInput) {
+      exitBookmarkMode();
     }
   });
 
   function refreshOpenBookmarkPanel() {
-    if (bookmarkPanel.hidden) {
+    if (!bookmarkMode) {
       bookmarkRoots = null;
       return;
     }
