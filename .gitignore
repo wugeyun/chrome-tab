@@ -2,6 +2,7 @@
 node_modules/
 *.log
 .omc/
+.vercel
 store-assets/
 store-screenshot*.png
 *.zip

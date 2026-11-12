@@ -7,6 +7,7 @@ import {
   hostnameOf,
   importCards,
   initTheme,
+  onStorageChange,
   parseShareUrl,
   setTheme,
 } from "./shared.js";
@@ -181,8 +182,7 @@ for (const input of themeInputs) {
   });
 }
 
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local") return;
+onStorageChange((changes) => {
   if (changes.cards) refreshPreview();
   if (changes.theme) syncThemeControls();
 });

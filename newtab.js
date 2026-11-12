@@ -8,6 +8,9 @@ import {
   hostnameOf,
   initTheme,
   normalizeUrl,
+  onStorageChange,
+  openUrl,
+  performSearch,
   removeCard,
   removeSearchHistory,
   reorderCards,
@@ -258,14 +261,7 @@ function runSearch(raw) {
 
   hideSuggest();
   void addSearchHistory(q);
-
-  if (/^(https?:\/\/|www\.)/i.test(q) || /^[\w-]+(\.[\w-]+)+([/:?#].*)?$/i.test(q)) {
-    const href = /^https?:\/\//i.test(q) ? q : `https://${q}`;
-    location.href = href;
-    return;
-  }
-
-  chrome.search.query({ text: q, disposition: "CURRENT_TAB" });
+  performSearch(q);
 }
 
 function openFirstBookmarkResult() {
@@ -892,11 +888,7 @@ function createCardElement(card) {
       suppressClick = false;
       return;
     }
-    if (e.metaKey || e.ctrlKey) {
-      chrome.tabs.create({ url: card.url });
-    } else {
-      location.href = card.url;
-    }
+    openUrl(card.url, { newTab: e.metaKey || e.ctrlKey });
   });
 
   li.addEventListener("keydown", (e) => {
@@ -987,8 +979,8 @@ async function render() {
   emptyHint.hidden = cards.length > 0;
 }
 
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.cards) render();
+onStorageChange((changes) => {
+  if (changes.cards) render();
 });
 
 render();
