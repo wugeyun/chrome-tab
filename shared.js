@@ -1,139 +1,29 @@
-/** Shared storage helpers for Fixed Cards New Tab (extension + web). */
+/** Shared storage helpers for Fixed Cards New Tab. */
 
 const STORAGE_KEY = "cards";
 const THEME_KEY = "theme";
 const SEARCH_HISTORY_KEY = "searchHistory";
 const SEARCH_HISTORY_LIMIT = 20;
-const WEB_STORAGE_PREFIX = "wuge-newtab:";
 
 /** @typedef {"light" | "dark" | "auto"} ThemeMode */
 
 const THEME_MODES = new Set(["light", "dark", "auto"]);
-
-/** True when running inside the Chromium extension pages. */
-export function isExtensionContext() {
-  try {
-    return typeof chrome !== "undefined" && !!chrome?.storage?.local;
-  } catch {
-    return false;
-  }
-}
 
 /** @param {unknown} value @returns {ThemeMode} */
 export function normalizeTheme(value) {
   return THEME_MODES.has(value) ? /** @type {ThemeMode} */ (value) : "auto";
 }
 
-/** @param {string} key */
-function webStorageKey(key) {
-  return `${WEB_STORAGE_PREFIX}${key}`;
-}
-
-/** @param {string} key @param {unknown} fallback */
-function readWebValue(key, fallback) {
-  try {
-    const raw = localStorage.getItem(webStorageKey(key));
-    if (raw == null) return fallback;
-    return JSON.parse(raw);
-  } catch {
-    return fallback;
-  }
-}
-
-/** @param {string} key @param {unknown} value */
-function writeWebValue(key, value) {
-  localStorage.setItem(webStorageKey(key), JSON.stringify(value));
-  try {
-    window.dispatchEvent(
-      new CustomEvent("wuge-storage", { detail: { key, value } })
-    );
-  } catch {
-    /* ignore */
-  }
-}
-
-/** @param {string[]} keys @returns {Promise<Record<string, unknown>>} */
-async function storageGet(keys) {
-  if (isExtensionContext()) {
-    return chrome.storage.local.get(keys);
-  }
-  /** @type {Record<string, unknown>} */
-  const out = {};
-  for (const key of keys) {
-    const value = readWebValue(key, undefined);
-    if (value !== undefined) out[key] = value;
-  }
-  return out;
-}
-
-/** @param {Record<string, unknown>} values */
-async function storageSet(values) {
-  if (isExtensionContext()) {
-    await chrome.storage.local.set(values);
-    return;
-  }
-  for (const [key, value] of Object.entries(values)) {
-    writeWebValue(key, value);
-  }
-}
-
-/**
- * Listen for local storage key changes in both extension and web.
- * @param {(changes: Record<string, { newValue?: unknown }>) => void} callback
- * @returns {() => void}
- */
-export function onStorageChange(callback) {
-  if (isExtensionContext()) {
-    /** @param {Record<string, chrome.storage.StorageChange>} changes @param {string} area */
-    const listener = (changes, area) => {
-      if (area !== "local") return;
-      /** @type {Record<string, { newValue?: unknown }>} */
-      const mapped = {};
-      for (const [key, change] of Object.entries(changes)) {
-        mapped[key] = { newValue: change.newValue };
-      }
-      callback(mapped);
-    };
-    chrome.storage.onChanged.addListener(listener);
-    return () => chrome.storage.onChanged.removeListener(listener);
-  }
-
-  /** @param {CustomEvent<{ key: string, value: unknown }>} event */
-  const onLocal = (event) => {
-    const key = event.detail?.key;
-    if (!key) return;
-    callback({ [key]: { newValue: event.detail.value } });
-  };
-  /** @param {StorageEvent} event */
-  const onWindow = (event) => {
-    if (!event.key || !event.key.startsWith(WEB_STORAGE_PREFIX)) return;
-    const key = event.key.slice(WEB_STORAGE_PREFIX.length);
-    let newValue;
-    try {
-      newValue = event.newValue == null ? undefined : JSON.parse(event.newValue);
-    } catch {
-      newValue = undefined;
-    }
-    callback({ [key]: { newValue } });
-  };
-  window.addEventListener("wuge-storage", /** @type {EventListener} */ (onLocal));
-  window.addEventListener("storage", onWindow);
-  return () => {
-    window.removeEventListener("wuge-storage", /** @type {EventListener} */ (onLocal));
-    window.removeEventListener("storage", onWindow);
-  };
-}
-
 /** @returns {Promise<ThemeMode>} */
 export async function getTheme() {
-  const data = await storageGet([THEME_KEY]);
+  const data = await chrome.storage.local.get(THEME_KEY);
   return normalizeTheme(data[THEME_KEY]);
 }
 
 /** @param {ThemeMode} mode */
 export async function setTheme(mode) {
   const next = normalizeTheme(mode);
-  await storageSet({ [THEME_KEY]: next });
+  await chrome.storage.local.set({ [THEME_KEY]: next });
   return next;
 }
 
@@ -148,13 +38,14 @@ export async function initTheme() {
 
   apply(await getTheme());
 
-  const dispose = onStorageChange((changes) => {
-    if (changes[THEME_KEY]) {
+  const onStorage = (changes, area) => {
+    if (area === "local" && changes[THEME_KEY]) {
       apply(changes[THEME_KEY].newValue);
     }
-  });
+  };
+  chrome.storage.onChanged.addListener(onStorage);
 
-  return dispose;
+  return () => chrome.storage.onChanged.removeListener(onStorage);
 }
 
 /**
@@ -163,7 +54,7 @@ export async function initTheme() {
 
 /** @returns {Promise<string[]>} */
 export async function getSearchHistory() {
-  const data = await storageGet([SEARCH_HISTORY_KEY]);
+  const data = await chrome.storage.local.get(SEARCH_HISTORY_KEY);
   const list = data[SEARCH_HISTORY_KEY];
   return Array.isArray(list) ? list.filter((q) => typeof q === "string" && q.trim()) : [];
 }
@@ -178,7 +69,7 @@ export async function addSearchHistory(query) {
     0,
     SEARCH_HISTORY_LIMIT
   );
-  await storageSet({ [SEARCH_HISTORY_KEY]: next });
+  await chrome.storage.local.set({ [SEARCH_HISTORY_KEY]: next });
   return next;
 }
 
@@ -187,7 +78,7 @@ export async function removeSearchHistory(query) {
   const q = query.trim().toLowerCase();
   const prev = await getSearchHistory();
   const next = prev.filter((item) => item.toLowerCase() !== q);
-  await storageSet({ [SEARCH_HISTORY_KEY]: next });
+  await chrome.storage.local.set({ [SEARCH_HISTORY_KEY]: next });
   return next;
 }
 
@@ -207,7 +98,6 @@ export async function filterSearchHistory(query, limit = 8) {
 
 /**
  * Bing OpenSearch-style suggestions: ["query", ["a", "b", ...]]
- * Web uses same-origin proxy to avoid CORS.
  * @param {string} query
  * @param {AbortSignal} [signal]
  * @returns {Promise<string[]>}
@@ -216,9 +106,7 @@ export async function fetchBingSuggestions(query, signal) {
   const q = query.trim();
   if (!q) return [];
 
-  const url = isExtensionContext()
-    ? `https://api.bing.com/osjson.aspx?query=${encodeURIComponent(q)}`
-    : `/api/bing-suggest?query=${encodeURIComponent(q)}`;
+  const url = `https://api.bing.com/osjson.aspx?query=${encodeURIComponent(q)}`;
   const res = await fetch(url, { signal, credentials: "omit" });
   if (!res.ok) return [];
 
@@ -227,51 +115,16 @@ export async function fetchBingSuggestions(query, signal) {
   return list.filter((item) => typeof item === "string" && item.trim());
 }
 
-/** Open a URL in the current tab or a new browser tab. */
-export function openUrl(url, { newTab = false } = {}) {
-  if (newTab && isExtensionContext() && chrome.tabs?.create) {
-    chrome.tabs.create({ url });
-    return;
-  }
-  if (newTab) {
-    window.open(url, "_blank", "noopener,noreferrer");
-    return;
-  }
-  location.href = url;
-}
-
-/**
- * Search or navigate. Extension uses chrome.search when available.
- * @param {string} raw
- */
-export function performSearch(raw) {
-  const q = raw.trim();
-  if (!q) return;
-
-  if (/^(https?:\/\/|www\.)/i.test(q) || /^[\w-]+(\.[\w-]+)+([/:?#].*)?$/i.test(q)) {
-    const href = /^https?:\/\//i.test(q) ? q : `https://${q}`;
-    location.href = href;
-    return;
-  }
-
-  if (isExtensionContext() && chrome.search?.query) {
-    chrome.search.query({ text: q, disposition: "CURRENT_TAB" });
-    return;
-  }
-
-  location.href = `https://www.bing.com/search?q=${encodeURIComponent(q)}`;
-}
-
 /** @returns {Promise<Card[]>} */
 export async function getCards() {
-  const data = await storageGet([STORAGE_KEY]);
+  const data = await chrome.storage.local.get(STORAGE_KEY);
   const cards = data[STORAGE_KEY];
   return Array.isArray(cards) ? cards : [];
 }
 
 /** @param {Card[]} cards */
 export async function saveCards(cards) {
-  await storageSet({ [STORAGE_KEY]: cards });
+  await chrome.storage.local.set({ [STORAGE_KEY]: cards });
 }
 
 /** @param {{ title: string, url: string }} input */
@@ -381,15 +234,12 @@ export function hostnameOf(href) {
   }
 }
 
-/** Favicon: extension API in Chrome, public icon service on web. */
+/** Favicon via Chrome extension API (works for chrome-extension pages). */
 export function faviconUrl(pageUrl, size = 64) {
-  if (isExtensionContext() && chrome.runtime?.getURL) {
-    const url = new URL(chrome.runtime.getURL("/_favicon/"));
-    url.searchParams.set("pageUrl", pageUrl);
-    url.searchParams.set("size", String(size));
-    return url.toString();
-  }
-  return `https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(pageUrl)}&sz=${size}`;
+  const url = new URL(chrome.runtime.getURL("/_favicon/"));
+  url.searchParams.set("pageUrl", pageUrl);
+  url.searchParams.set("size", String(size));
+  return url.toString();
 }
 
 export function isRestrictedUrl(url) {
@@ -398,8 +248,8 @@ export function isRestrictedUrl(url) {
   );
 }
 
-/** Share links open on the web new-tab site; hash carries card payload. */
-export const SHARE_BASE_URL = "https://tab.wuge.xyz";
+/** Share links are hosted on the public repo page + hash payload. */
+export const SHARE_BASE_URL = "https://github.com/wugeyun/chrome-tab";
 const SHARE_HASH_PREFIX = "wuge=";
 
 /** @param {Card[]} cards */
@@ -503,7 +353,7 @@ async function inflate(bytes) {
 }
 
 /**
- * Build a shareable URL that embeds card data in the hash.
+ * Build a shareable GitHub URL that embeds card data in the hash.
  * @param {Card[]} cards
  */
 export async function buildShareUrl(cards) {
