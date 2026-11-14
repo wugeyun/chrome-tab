@@ -17,7 +17,6 @@ import {
   resumeSync,
   rotateSyncCode,
   setTheme,
-  syncNow,
 } from "./shared.js";
 
 initTheme();
@@ -40,10 +39,8 @@ const syncBindInput = document.getElementById("sync-bind-input");
 const syncBindBtn = document.getElementById("sync-bind-btn");
 const syncCodeDisplay = document.getElementById("sync-code-display");
 const syncCopyBtn = document.getElementById("sync-copy-btn");
-const syncNowBtn = document.getElementById("sync-now-btn");
 const syncRotateBtn = document.getElementById("sync-rotate-btn");
-const syncPauseBtn = document.getElementById("sync-pause-btn");
-const syncResumeBtn = document.getElementById("sync-resume-btn");
+const syncToggleBtn = document.getElementById("sync-toggle-btn");
 const syncStateEl = document.getElementById("sync-state");
 const syncLastEl = document.getElementById("sync-last");
 const syncErrorEl = document.getElementById("sync-error");
@@ -119,9 +116,7 @@ async function refreshSyncPanel() {
   syncCodeDisplay.value = formatSyncCode(config.syncId, config.secret);
   syncLastEl.textContent = formatSyncTime(config.lastSyncedAt);
   syncStateEl.textContent = config.enabled ? "已开启" : "已暂停";
-  syncPauseBtn.hidden = !config.enabled;
-  syncResumeBtn.hidden = config.enabled;
-  syncNowBtn.hidden = !config.enabled;
+  syncToggleBtn.textContent = config.enabled ? "暂停同步" : "立即同步";
   syncRotateBtn.hidden = false;
 
   if (config.lastError) {
@@ -311,27 +306,6 @@ syncCopyBtn.addEventListener("click", async () => {
   }
 });
 
-syncNowBtn.addEventListener("click", async () => {
-  syncNowBtn.disabled = true;
-  try {
-    const result = await syncNow({ force: true });
-    await refreshSyncPanel();
-    await refreshPreview();
-    const msg =
-      result?.total != null
-        ? `同步完成，当前共 ${result.total} 张卡片。`
-        : "同步完成。";
-    setSyncFeedback(msg, "ok");
-    setStatus(msg, "ok");
-  } catch (err) {
-    await refreshSyncPanel();
-    setSyncFeedback(err?.message || "同步失败", "err");
-    setStatus(err?.message || "同步失败", "err");
-  } finally {
-    syncNowBtn.disabled = false;
-  }
-});
-
 syncRotateBtn.addEventListener("click", async () => {
   const ok = confirm(
     "将生成新同步码，并立即作废旧码。其他仍使用旧码的浏览器会提示失效，需重新粘贴新码。本地卡片不会清空。确定更新？"
@@ -353,35 +327,37 @@ syncRotateBtn.addEventListener("click", async () => {
   }
 });
 
-syncPauseBtn.addEventListener("click", async () => {
-  const ok = confirm(
-    "暂停后本浏览器将暂时停止自动同步，同步码与云端数据保留，可随时恢复。确定暂停？"
-  );
-  if (!ok) return;
-  await pauseSync();
-  await refreshSyncPanel();
-  setSyncFeedback("已暂停云同步，同步码仍有效，可随时恢复。", "ok");
-  setStatus("已暂停云同步。", "ok");
-});
+syncToggleBtn.addEventListener("click", async () => {
+  const config = await getSyncConfig();
+  if (config.enabled) {
+    const ok = confirm(
+      "暂停后本浏览器将暂时停止自动同步，同步码与云端数据保留，可随时点「立即同步」恢复。确定暂停？"
+    );
+    if (!ok) return;
+    await pauseSync();
+    await refreshSyncPanel();
+    setSyncFeedback("已暂停云同步，同步码仍有效；需要时点「立即同步」即可恢复。", "ok");
+    setStatus("已暂停云同步。", "ok");
+    return;
+  }
 
-syncResumeBtn.addEventListener("click", async () => {
-  syncResumeBtn.disabled = true;
+  syncToggleBtn.disabled = true;
   try {
     const result = await resumeSync();
     await refreshSyncPanel();
     await refreshPreview();
     const msg =
       result?.total != null
-        ? `已恢复同步，当前共 ${result.total} 张卡片。`
-        : "已恢复同步。";
+        ? `已同步并恢复自动同步，当前共 ${result.total} 张卡片。`
+        : "已同步并恢复自动同步。";
     setSyncFeedback(msg, "ok");
     setStatus(msg, "ok");
   } catch (err) {
     await refreshSyncPanel();
-    setSyncFeedback(err?.message || "恢复同步失败", "err");
-    setStatus(err?.message || "恢复同步失败", "err");
+    setSyncFeedback(err?.message || "同步失败", "err");
+    setStatus(err?.message || "同步失败", "err");
   } finally {
-    syncResumeBtn.disabled = false;
+    syncToggleBtn.disabled = false;
   }
 });
 
