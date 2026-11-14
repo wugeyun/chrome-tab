@@ -190,8 +190,13 @@ export async function updateCard(id, patch) {
 
   const prev = cards[index];
   const next = { ...prev };
+  let changed = false;
   if (typeof patch.title === "string") {
-    next.title = patch.title.trim() || "未命名";
+    const title = patch.title.trim() || "未命名";
+    if (title !== prev.title) {
+      next.title = title;
+      changed = true;
+    }
   }
   if (typeof patch.url === "string") {
     const normalizedUrl = normalizeUrl(patch.url);
@@ -199,9 +204,14 @@ export async function updateCard(id, patch) {
     if (!urlsEqual(prev.url, normalizedUrl)) {
       await rememberDeletedUrl(prev.url);
       await forgetDeletedUrl(normalizedUrl);
+      next.url = normalizedUrl;
+      changed = true;
+    } else {
+      next.url = normalizedUrl;
     }
-    next.url = normalizedUrl;
   }
+  // Sync merge uses createdAt as "last write"; bump so title edits propagate.
+  if (changed) next.createdAt = Date.now();
   cards[index] = next;
   await saveCards(cards);
   return next;
@@ -876,15 +886,13 @@ export function mergeCardsForSync(local, remote, deletedUrls = []) {
       continue;
     }
     const cur = merged[idx];
-    const remoteNewer =
-      (card.createdAt || 0) > (cur.createdAt || 0) &&
-      (card.title || "").trim() &&
-      card.title !== cur.title;
-    if (remoteNewer) {
+    const remoteTs = Number(card.createdAt) || 0;
+    const localTs = Number(cur.createdAt) || 0;
+    if (remoteTs > localTs) {
       merged[idx] = {
         ...cur,
-        title: card.title.trim() || cur.title,
-        createdAt: cur.createdAt || card.createdAt || Date.now(),
+        title: (card.title || "").trim() || cur.title,
+        createdAt: remoteTs,
       };
     }
   }

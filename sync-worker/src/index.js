@@ -8,6 +8,8 @@ const ID_RE = /^[a-f0-9]{24}$/;
 const MAX_CIPHERTEXT_CHARS = 96_000; // ~64KB binary after base64url
 const RATE_WINDOW_MS = 60_000;
 const RATE_LIMIT = 120;
+/** Idle slots auto-expire; each successful write refreshes the TTL. */
+const KV_TTL_SECONDS = 180 * 24 * 60 * 60;
 
 /** @type {Map<string, { count: number, resetAt: number }>} */
 const rateMap = new Map();
@@ -179,7 +181,9 @@ async function handlePut(env, id, request) {
     revision: nextRevision,
     updatedAt: Date.now(),
   };
-  await env.SYNC_KV.put(kvKey(id), JSON.stringify(record));
+  await env.SYNC_KV.put(kvKey(id), JSON.stringify(record), {
+    expirationTtl: KV_TTL_SECONDS,
+  });
 
   return json(
     { ok: true, revision: nextRevision },
@@ -213,7 +217,8 @@ async function handleDelete(env, id) {
       revoked: true,
       revision: nextRevision,
       updatedAt: Date.now(),
-    })
+    }),
+    { expirationTtl: KV_TTL_SECONDS }
   );
 
   return json(
