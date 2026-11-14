@@ -37,7 +37,7 @@
 
         <div id="sync-on" hidden>
           <p class="meta">
-            状态：已开启 · 上次同步
+            状态：<strong id="sync-state">已开启</strong> · 上次同步
             <strong id="sync-last">尚未同步</strong>
           </p>
           <label class="desc" for="sync-code-display">同步码（另一浏览器粘贴此码）</label>
@@ -45,10 +45,14 @@
           <div class="row">
             <button type="button" class="primary" id="sync-copy-btn">复制同步码</button>
             <button type="button" class="ghost" id="sync-now-btn">立即同步</button>
-            <button type="button" class="danger" id="sync-disable-btn">关闭同步</button>
+            <button type="button" class="ghost" id="sync-rotate-btn">更新同步码</button>
+            <button type="button" class="ghost" id="sync-pause-btn">暂停同步</button>
+            <button type="button" class="ghost" id="sync-resume-btn" hidden>恢复同步</button>
           </div>
-          <p class="desc" id="sync-error" hidden></p>
         </div>
+
+        <p class="sync-feedback" id="sync-feedback" hidden></p>
+        <p class="desc" id="sync-error" hidden></p>
       </section>
 
       <section class="panel">

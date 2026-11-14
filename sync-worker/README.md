@@ -33,8 +33,9 @@ npx wrangler deploy
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `GET` | `/v1/sync/:id` | 取密文；不存在时 `revision: 0`、`ciphertext: null` |
-| `PUT` | `/v1/sync/:id` | 写密文；需 `If-Match: "<revision>"` 或 body.`revision`；冲突返回 `409` |
+| `GET` | `/v1/sync/:id` | 取密文；不存在时 `revision: 0`、`ciphertext: null`；已作废返回 `410` |
+| `PUT` | `/v1/sync/:id` | 写密文；需 `If-Match: "<revision>"` 或 body.`revision`；冲突 `409`；已作废 `410` |
+| `DELETE` | `/v1/sync/:id` | 作废槽位：删除密文并标记 `revoked`，禁止再用旧码写回 |
 
 `:id` 为 24 位小写 hex（12 字节）。服务端不解密、不存同步码。
 

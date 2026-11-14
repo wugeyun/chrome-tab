@@ -24,8 +24,11 @@ const SYNC_MAX_RETRIES = 3;
  *   lastSyncedAt: number | null,
  *   lastRevision: number,
  *   lastError: string | null,
+ *   revoked: boolean,
  * }} SyncConfig
  */
+
+export const SYNC_REVOKED_MESSAGE = "同步码已失效，请在选项页绑定新码";
 
 /** @typedef {"light" | "dark" | "auto"} ThemeMode */
 
@@ -506,6 +509,7 @@ function emptySyncConfig() {
     lastSyncedAt: null,
     lastRevision: 0,
     lastError: null,
+    revoked: false,
   };
 }
 
@@ -527,6 +531,7 @@ export async function getSyncConfig() {
         ? raw.lastRevision
         : 0,
     lastError: typeof raw.lastError === "string" ? raw.lastError : null,
+    revoked: Boolean(raw.revoked),
   };
 }
 
@@ -644,13 +649,17 @@ export function parseSyncCode(raw) {
   };
 }
 
-/** @returns {Promise<{ syncId: string, secret: string, code: string }>} */
-export async function createSyncSession() {
+function generateSyncCredentials() {
   const idBytes = crypto.getRandomValues(new Uint8Array(SYNC_ID_BYTES));
   const secretBytes = crypto.getRandomValues(new Uint8Array(SYNC_SECRET_BYTES));
   const syncId = bytesToHex(idBytes);
   const secret = bytesToHex(secretBytes);
-  const code = formatSyncCode(syncId, secret);
+  return { syncId, secret, code: formatSyncCode(syncId, secret) };
+}
+
+/** @returns {Promise<{ syncId: string, secret: string, code: string }>} */
+export async function createSyncSession() {
+  const { syncId, secret, code } = generateSyncCredentials();
   await setSyncConfig({
     enabled: true,
     syncId,
@@ -658,6 +667,7 @@ export async function createSyncSession() {
     lastSyncedAt: null,
     lastRevision: 0,
     lastError: null,
+    revoked: false,
   });
   await syncNow({ force: true });
   return { syncId, secret, code };
@@ -673,20 +683,115 @@ export async function bindSyncCode(rawCode) {
     lastSyncedAt: null,
     lastRevision: 0,
     lastError: null,
+    revoked: false,
   });
   const result = await syncNow({ force: true });
   return result;
 }
 
-export async function disableSync() {
+/** Pause sync locally; keep sync code so it can resume later. */
+export async function pauseSync() {
+  const config = await getSyncConfig();
+  if (!config.syncId || !config.secret) {
+    throw new Error("尚未绑定同步码");
+  }
   await setSyncConfig({
     enabled: false,
-    syncId: "",
-    secret: "",
-    lastSyncedAt: null,
-    lastRevision: 0,
     lastError: null,
   });
+}
+
+/** Resume a previously paused sync with the same code. */
+export async function resumeSync() {
+  const config = await getSyncConfig();
+  if (!config.syncId || !config.secret) {
+    throw new Error("尚未绑定同步码");
+  }
+  if (config.revoked) {
+    throw new Error(SYNC_REVOKED_MESSAGE);
+  }
+  await setSyncConfig({ enabled: true, lastError: null, revoked: false });
+  return syncNow({ force: true });
+}
+
+/** Clear local sync binding only (does not revoke cloud slot). */
+export async function unbindSync() {
+  await setSyncConfig(emptySyncConfig());
+}
+
+/** @deprecated use pauseSync — kept for older UI call sites */
+export async function disableSync() {
+  return pauseSync();
+}
+
+/**
+ * Rotate to a new sync code: upload to new slot, revoke old slot immediately.
+ * Local cards are preserved. Other devices on the old code will see revoked.
+ * @returns {Promise<{ syncId: string, secret: string, code: string }>}
+ */
+export async function rotateSyncCode() {
+  const prev = await getSyncConfig();
+  if (!prev.syncId || !prev.secret) {
+    throw new Error("尚未绑定同步码");
+  }
+  if (prev.revoked) {
+    throw new Error(SYNC_REVOKED_MESSAGE);
+  }
+
+  if (prev.enabled) {
+    try {
+      await syncNow({ force: true });
+    } catch (err) {
+      if (err instanceof Error && err.message === SYNC_REVOKED_MESSAGE) {
+        throw err;
+      }
+      // Continue with local snapshot if last push failed for transient reasons.
+    }
+  }
+
+  const cards = await getCards();
+  const deletedUrls = await getDeletedUrls();
+  const next = generateSyncCredentials();
+  const ciphertext = await encryptPayload(
+    buildSyncPayload(cards, deletedUrls),
+    next.secret
+  );
+
+  const putRes = await fetch(syncEndpoint(next.syncId), {
+    method: "PUT",
+    credentials: "omit",
+    headers: {
+      "Content-Type": "application/json",
+      "If-Match": '"0"',
+    },
+    body: JSON.stringify({ ciphertext, revision: 0 }),
+  });
+  if (!putRes.ok) {
+    throw new Error(await describeSyncHttpError("创建新同步槽失败", putRes));
+  }
+  const putBody = await putRes.json().catch(() => ({}));
+  const nextRevision = Number(putBody.revision) || 1;
+
+  const revokeRes = await fetch(syncEndpoint(prev.syncId), {
+    method: "DELETE",
+    credentials: "omit",
+    cache: "no-store",
+  });
+  if (!revokeRes.ok && revokeRes.status !== 404) {
+    throw new Error(await describeSyncHttpError("作废旧同步码失败", revokeRes));
+  }
+
+  await setSyncConfig({
+    enabled: true,
+    syncId: next.syncId,
+    secret: next.secret,
+    lastSyncedAt: Date.now(),
+    lastRevision: nextRevision,
+    lastError: null,
+    revoked: false,
+  });
+
+  return next;
 }
 
 /** @param {string} secretHex */
@@ -847,11 +952,15 @@ function syncEndpoint(syncId) {
  * @param {Response} res
  */
 async function describeSyncHttpError(prefix, res) {
+  if (res.status === 410) {
+    return SYNC_REVOKED_MESSAGE;
+  }
   let detail = "";
   const contentType = res.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
     try {
       const body = await res.json();
+      if (body?.error === "revoked") return SYNC_REVOKED_MESSAGE;
       if (body?.error) detail = `：${body.error}`;
     } catch {
       /* ignore */
@@ -864,6 +973,15 @@ async function describeSyncHttpError(prefix, res) {
     return `${prefix}：请求过于频繁，请稍后再试`;
   }
   return `${prefix}（${res.status}${detail}）`;
+}
+
+/** @param {string} message */
+async function markSyncRevoked(message = SYNC_REVOKED_MESSAGE) {
+  await setSyncConfig({
+    enabled: false,
+    revoked: true,
+    lastError: message,
+  });
 }
 
 let syncInFlight = null;
@@ -920,6 +1038,10 @@ export async function syncNow(opts = {}) {
           credentials: "omit",
           cache: "no-store",
         });
+        if (getRes.status === 410) {
+          await markSyncRevoked();
+          throw new Error(SYNC_REVOKED_MESSAGE);
+        }
         if (!getRes.ok) {
           throw new Error(await describeSyncHttpError("同步拉取失败", getRes));
         }
@@ -948,6 +1070,7 @@ export async function syncNow(opts = {}) {
           if (!deletedUrls.some((d) => urlsEqual(d, url))) deletedUrls.push(url);
         }
 
+        // Keep local cards even when remote is empty (e.g. never uploaded yet).
         const merged = mergeCardsForSync(localCards, remoteCards, deletedUrls);
         await saveDeletedUrls(deletedUrls);
         await saveCards(merged, { skipSyncQueue: true });
@@ -967,6 +1090,10 @@ export async function syncNow(opts = {}) {
           body: JSON.stringify({ ciphertext, revision }),
         });
 
+        if (putRes.status === 410) {
+          await markSyncRevoked();
+          throw new Error(SYNC_REVOKED_MESSAGE);
+        }
         if (putRes.status === 409) {
           continue;
         }
@@ -980,6 +1107,7 @@ export async function syncNow(opts = {}) {
           lastSyncedAt: Date.now(),
           lastRevision: nextRevision,
           lastError: null,
+          revoked: false,
         });
         return {
           ok: true,
@@ -991,7 +1119,11 @@ export async function syncNow(opts = {}) {
       throw new Error("同步冲突过多，请稍后重试");
     } catch (err) {
       const message = err instanceof Error ? err.message : "同步失败";
-      await setSyncConfig({ lastError: message });
+      if (message === SYNC_REVOKED_MESSAGE) {
+        await markSyncRevoked(message);
+      } else {
+        await setSyncConfig({ lastError: message });
+      }
       throw err instanceof Error ? err : new Error(message);
     } finally {
       syncInFlight = null;

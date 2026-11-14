@@ -297,6 +297,24 @@ button {
   color: var(--danger);
 }
 
+.sync-feedback {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.sync-feedback.ok {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent-deep);
+}
+
+.sync-feedback.err {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
 .status {
   margin: 0;
   padding: 12px 14px;
