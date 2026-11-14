@@ -2,12 +2,22 @@
  * Anonymous sync API for 武哥新标签页.
  * Stores only opaque ciphertext; clients hold the encryption key in the sync code.
  * Rotated codes are revoked: ciphertext removed, slot marked revoked (no recreate).
+ *
+ * Abuse controls: per-method rate limits, PoW on first create, KV TTL auto-expiry.
  */
 
 const ID_RE = /^[a-f0-9]{24}$/;
 const MAX_CIPHERTEXT_CHARS = 96_000; // ~64KB binary after base64url
 const RATE_WINDOW_MS = 60_000;
-const RATE_LIMIT = 120;
+const RATE_LIMITS = {
+  GET: 60,
+  PUT: 20,
+  DELETE: 20,
+};
+/** Leading zero bits required for SHA-256(syncId + ":" + nonce) on first create. */
+const POW_BITS = 18;
+/** Refresh on every successful write; idle slots auto-delete. */
+const KV_TTL_SECONDS = 90 * 24 * 60 * 60;
 
 /** @type {Map<string, { count: number, resetAt: number }>} */
 const rateMap = new Map();
@@ -15,7 +25,7 @@ const rateMap = new Map();
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, If-Match",
+  "Access-Control-Allow-Headers": "Content-Type, If-Match, X-PoW",
   "Access-Control-Expose-Headers": "ETag, X-Revision",
   "Access-Control-Max-Age": "86400",
 };
@@ -31,7 +41,7 @@ export default {
     }
 
     const ip = request.headers.get("CF-Connecting-IP") || "unknown";
-    if (!allowRequest(ip)) {
+    if (!allowRequest(ip, request.method)) {
       return json({ error: "rate_limited" }, 429);
     }
 
@@ -61,15 +71,18 @@ export default {
 
 /**
  * @param {string} ip
+ * @param {string} method
  */
-function allowRequest(ip) {
+function allowRequest(ip, method) {
+  const limit = RATE_LIMITS[method] ?? 30;
+  const key = `${ip}:${method}`;
   const now = Date.now();
-  const entry = rateMap.get(ip);
+  const entry = rateMap.get(key);
   if (!entry || now >= entry.resetAt) {
-    rateMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    rateMap.set(key, { count: 1, resetAt: now + RATE_WINDOW_MS });
     return true;
   }
-  if (entry.count >= RATE_LIMIT) return false;
+  if (entry.count >= limit) return false;
   entry.count += 1;
   return true;
 }
@@ -86,6 +99,17 @@ async function readRecord(env, id) {
   } catch {
     return { corrupt: true };
   }
+}
+
+/**
+ * @param {{ SYNC_KV: KVNamespace }} env
+ * @param {string} id
+ * @param {object} record
+ */
+async function putRecord(env, id, record) {
+  await env.SYNC_KV.put(kvKey(id), JSON.stringify(record), {
+    expirationTtl: KV_TTL_SECONDS,
+  });
 }
 
 /**
@@ -173,13 +197,25 @@ async function handlePut(env, id, request) {
     );
   }
 
+  // First create (empty slot): require cheap proof-of-work to deter mass spam.
+  if (!existing) {
+    const nonce = request.headers.get("X-PoW") || "";
+    if (!(await verifyPow(id, nonce, POW_BITS))) {
+      return json(
+        { error: "pow_required", bits: POW_BITS },
+        400,
+        { "X-PoW-Bits": String(POW_BITS) }
+      );
+    }
+  }
+
   const nextRevision = currentRevision + 1;
   const record = {
     ciphertext,
     revision: nextRevision,
     updatedAt: Date.now(),
   };
-  await env.SYNC_KV.put(kvKey(id), JSON.stringify(record));
+  await putRecord(env, id, record);
 
   return json(
     { ok: true, revision: nextRevision },
@@ -207,14 +243,11 @@ async function handleDelete(env, id) {
 
   const currentRevision = existing ? Number(existing.revision) || 0 : 0;
   const nextRevision = currentRevision + 1;
-  await env.SYNC_KV.put(
-    kvKey(id),
-    JSON.stringify({
-      revoked: true,
-      revision: nextRevision,
-      updatedAt: Date.now(),
-    })
-  );
+  await putRecord(env, id, {
+    revoked: true,
+    revision: nextRevision,
+    updatedAt: Date.now(),
+  });
 
   return json(
     { ok: true, revoked: true, revision: nextRevision },
@@ -237,6 +270,34 @@ function parseRevision(value) {
   const cleaned = value.trim().replace(/^W\//, "").replace(/"/g, "");
   if (!/^\d+$/.test(cleaned)) return null;
   return Number(cleaned);
+}
+
+/**
+ * @param {string} syncId
+ * @param {string} nonce
+ * @param {number} bits
+ */
+async function verifyPow(syncId, nonce, bits) {
+  if (!nonce || typeof nonce !== "string") return false;
+  if (!/^[a-f0-9]{1,32}$/i.test(nonce)) return false;
+  const data = new TextEncoder().encode(`${syncId}:${nonce.toLowerCase()}`);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+  return hasLeadingZeroBits(digest, bits);
+}
+
+/**
+ * @param {Uint8Array} bytes
+ * @param {number} bits
+ */
+function hasLeadingZeroBits(bytes, bits) {
+  const fullBytes = Math.floor(bits / 8);
+  const rem = bits % 8;
+  for (let i = 0; i < fullBytes; i += 1) {
+    if (bytes[i] !== 0) return false;
+  }
+  if (rem === 0) return true;
+  const mask = 0xff << (8 - rem);
+  return (bytes[fullBytes] & mask) === 0;
 }
 
 /**

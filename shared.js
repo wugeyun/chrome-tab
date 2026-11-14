@@ -15,6 +15,8 @@ const SYNC_ID_BYTES = 12;
 const SYNC_SECRET_BYTES = 16;
 const SYNC_QUEUE_MS = 800;
 const SYNC_MAX_RETRIES = 3;
+/** Must match sync-worker POW_BITS (first-create anti-spam). */
+const SYNC_POW_BITS = 18;
 
 /**
  * @typedef {{
@@ -657,6 +659,40 @@ function generateSyncCredentials() {
   return { syncId, secret, code: formatSyncCode(syncId, secret) };
 }
 
+/**
+ * @param {Uint8Array} bytes
+ * @param {number} bits
+ */
+function hasLeadingZeroBits(bytes, bits) {
+  const fullBytes = Math.floor(bits / 8);
+  const rem = bits % 8;
+  for (let i = 0; i < fullBytes; i += 1) {
+    if (bytes[i] !== 0) return false;
+  }
+  if (rem === 0) return true;
+  const mask = 0xff << (8 - rem);
+  return (bytes[fullBytes] & mask) === 0;
+}
+
+/**
+ * Solve SHA-256(syncId + ":" + nonce) with SYNC_POW_BITS leading zero bits.
+ * Used only when creating an empty cloud slot.
+ * @param {string} syncId
+ * @param {number} [bits]
+ * @returns {Promise<string>} nonce hex
+ */
+async function solveSyncPow(syncId, bits = SYNC_POW_BITS) {
+  const enc = new TextEncoder();
+  for (let n = 0; n < 16_777_216; n += 1) {
+    const nonce = n.toString(16);
+    const digest = new Uint8Array(
+      await crypto.subtle.digest("SHA-256", enc.encode(`${syncId}:${nonce}`))
+    );
+    if (hasLeadingZeroBits(digest, bits)) return nonce;
+  }
+  throw new Error("同步防刷校验超时，请重试");
+}
+
 /** @returns {Promise<{ syncId: string, secret: string, code: string }>} */
 export async function createSyncSession() {
   const { syncId, secret, code } = generateSyncCredentials();
@@ -757,12 +793,14 @@ export async function rotateSyncCode() {
     next.secret
   );
 
+  const pow = await solveSyncPow(next.syncId);
   const putRes = await fetch(syncEndpoint(next.syncId), {
     method: "PUT",
     credentials: "omit",
     headers: {
       "Content-Type": "application/json",
       "If-Match": '"0"',
+      "X-PoW": pow,
     },
     body: JSON.stringify({ ciphertext, revision: 0 }),
   });
@@ -961,6 +999,9 @@ async function describeSyncHttpError(prefix, res) {
     try {
       const body = await res.json();
       if (body?.error === "revoked") return SYNC_REVOKED_MESSAGE;
+      if (body?.error === "pow_required") {
+        return `${prefix}：同步服务已升级防刷校验，请更新扩展后重试`;
+      }
       if (body?.error) detail = `：${body.error}`;
     } catch {
       /* ignore */
@@ -1080,13 +1121,19 @@ export async function syncNow(opts = {}) {
           config.secret
         );
 
+        /** @type {Record<string, string>} */
+        const putHeaders = {
+          "Content-Type": "application/json",
+          "If-Match": `"${revision}"`,
+        };
+        if (revision === 0) {
+          putHeaders["X-PoW"] = await solveSyncPow(config.syncId);
+        }
+
         const putRes = await fetch(syncEndpoint(config.syncId), {
           method: "PUT",
           credentials: "omit",
-          headers: {
-            "Content-Type": "application/json",
-            "If-Match": `"${revision}"`,
-          },
+          headers: putHeaders,
           body: JSON.stringify({ ciphertext, revision }),
         });
 

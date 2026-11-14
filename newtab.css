@@ -96,14 +96,14 @@ html[data-theme="dark"] {
 html,
 body {
   margin: 0;
-  min-height: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
 body {
   color: var(--ink);
   font-family: var(--font-body);
   background: var(--paper);
-  overflow-x: hidden;
 }
 
 .atmosphere {
@@ -124,16 +124,22 @@ body {
 }
 
 .shell {
+  display: flex;
+  flex-direction: column;
   width: min(1080px, calc(100% - 48px));
+  height: 100%;
+  max-height: 100dvh;
   margin: 0 auto;
-  padding: 36px 0 72px;
+  padding: 36px 0 24px;
+  overflow: hidden;
 }
 
 .hero {
   position: relative;
   z-index: 5;
+  flex: none;
   text-align: center;
-  margin-bottom: 40px;
+  margin-bottom: 32px;
   animation: rise 0.7s ease both;
 }
 
@@ -446,6 +452,13 @@ body {
 .board {
   position: relative;
   z-index: 1;
+  flex: 0 1 auto;
+  min-height: 0;
+  width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   background: var(--panel);
   backdrop-filter: blur(16px);
   border: 1px solid var(--line);
@@ -453,6 +466,64 @@ body {
   box-shadow: var(--shadow);
   padding: 22px 22px 28px;
   animation: rise 0.8s ease 0.08s both;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.board::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .board {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  .board:hover {
+    scrollbar-color: rgba(22, 52, 58, 0.28) transparent;
+  }
+
+  .board::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .board::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  .board:hover::-webkit-scrollbar-thumb {
+    background: rgba(22, 52, 58, 0.28);
+    background-clip: padding-box;
+  }
+
+  .board::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  html[data-theme="dark"] .board:hover {
+    scrollbar-color: rgba(230, 238, 240, 0.28) transparent;
+  }
+
+  html[data-theme="dark"] .board:hover::-webkit-scrollbar-thumb {
+    background: rgba(230, 238, 240, 0.28);
+    background-clip: padding-box;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    html[data-theme="auto"] .board:hover {
+      scrollbar-color: rgba(230, 238, 240, 0.28) transparent;
+    }
+
+    html[data-theme="auto"] .board:hover::-webkit-scrollbar-thumb {
+      background: rgba(230, 238, 240, 0.28);
+      background-clip: padding-box;
+    }
+  }
 }
 
 .primary-btn,
@@ -708,7 +779,8 @@ body {
 }
 
 .credit {
-  margin: 14px 0 0;
+  flex: none;
+  margin: 12px 0 0;
   text-align: center;
   font-size: 0.75rem;
   letter-spacing: 0.06em;
@@ -719,7 +791,20 @@ body {
 @media (max-width: 640px) {
   .shell {
     width: min(100% - 24px, 1080px);
-    padding-top: 28px;
+    padding: 28px 0 16px;
   }
 
+  .hero {
+    margin-bottom: 20px;
+  }
+
+  .grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .card {
+    gap: 8px;
+    padding: 12px 6px 10px;
+  }
 }
