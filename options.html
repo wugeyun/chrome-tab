@@ -10,8 +10,46 @@
     <main class="page">
       <header>
         <h1>武哥新标签页</h1>
-        <p class="lead">用分享链接在电脑之间迁移卡片</p>
+        <p class="lead">云同步码跨浏览器同步，也可用分享链接一次性迁移</p>
       </header>
+
+      <section class="panel" id="sync-panel">
+        <h2>云同步</h2>
+        <p class="desc">
+          免注册：生成一串同步码，在 Chrome / Edge 等浏览器的选项页粘贴即可。打开新标签页或改卡片时会自动合并同步。卡片数据经端到端加密后同步到云端，同步码即密钥，请勿泄露。
+        </p>
+
+        <div id="sync-off">
+          <div class="row">
+            <button type="button" class="primary" id="sync-create-btn">生成同步码</button>
+          </div>
+          <p class="desc sync-or">已有同步码？粘贴到下方绑定：</p>
+          <textarea
+            id="sync-bind-input"
+            rows="2"
+            spellcheck="false"
+            placeholder="粘贴 WUGE1.xxx 同步码"
+          ></textarea>
+          <div class="row">
+            <button type="button" class="primary" id="sync-bind-btn">绑定并同步</button>
+          </div>
+        </div>
+
+        <div id="sync-on" hidden>
+          <p class="meta">
+            状态：已开启 · 上次同步
+            <strong id="sync-last">尚未同步</strong>
+          </p>
+          <label class="desc" for="sync-code-display">同步码（另一浏览器粘贴此码）</label>
+          <textarea id="sync-code-display" rows="2" readonly spellcheck="false"></textarea>
+          <div class="row">
+            <button type="button" class="primary" id="sync-copy-btn">复制同步码</button>
+            <button type="button" class="ghost" id="sync-now-btn">立即同步</button>
+            <button type="button" class="danger" id="sync-disable-btn">关闭同步</button>
+          </div>
+          <p class="desc" id="sync-error" hidden></p>
+        </div>
+      </section>
 
       <section class="panel">
         <h2>外观</h2>

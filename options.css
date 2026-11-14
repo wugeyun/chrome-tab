@@ -262,6 +262,41 @@ button {
   background: var(--accent-deep);
 }
 
+.ghost {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  font-weight: 600;
+}
+
+.ghost:hover {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.danger {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.danger:hover {
+  background: color-mix(in srgb, var(--danger) 22%, transparent);
+}
+
+.sync-or {
+  margin-top: 16px;
+}
+
+#sync-panel code {
+  font-size: 0.85em;
+}
+
+#sync-error {
+  margin-top: 10px;
+  color: var(--danger);
+}
+
 .status {
   margin: 0;
   padding: 12px 14px;

@@ -1,0 +1,12 @@
+name = "wuge-newtab-sync"
+main = "src/index.js"
+compatibility_date = "2025-11-01"
+workers_dev = true
+
+[[routes]]
+pattern = "tab.wuge.xyz"
+custom_domain = true
+
+[[kv_namespaces]]
+binding = "SYNC_KV"
+id = "e420fb902efe40269aaa37acb3648779"

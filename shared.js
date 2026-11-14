@@ -4,6 +4,28 @@ const STORAGE_KEY = "cards";
 const THEME_KEY = "theme";
 const SEARCH_HISTORY_KEY = "searchHistory";
 const SEARCH_HISTORY_LIMIT = 20;
+const SYNC_CONFIG_KEY = "syncConfig";
+const DELETED_URLS_KEY = "cardDeletedUrls";
+const DELETED_URLS_LIMIT = 500;
+
+/** Public sync API (Cloudflare Worker on custom domain). */
+export const SYNC_API_BASE = "https://tab.wuge.xyz";
+const SYNC_CODE_PREFIX = "WUGE1.";
+const SYNC_ID_BYTES = 12;
+const SYNC_SECRET_BYTES = 16;
+const SYNC_QUEUE_MS = 800;
+const SYNC_MAX_RETRIES = 3;
+
+/**
+ * @typedef {{
+ *   enabled: boolean,
+ *   syncId: string,
+ *   secret: string,
+ *   lastSyncedAt: number | null,
+ *   lastRevision: number,
+ *   lastError: string | null,
+ * }} SyncConfig
+ */
 
 /** @typedef {"light" | "dark" | "auto"} ThemeMode */
 
@@ -122,9 +144,13 @@ export async function getCards() {
   return Array.isArray(cards) ? cards : [];
 }
 
-/** @param {Card[]} cards */
-export async function saveCards(cards) {
+/**
+ * @param {Card[]} cards
+ * @param {{ skipSyncQueue?: boolean }} [opts]
+ */
+export async function saveCards(cards, opts = {}) {
   await chrome.storage.local.set({ [STORAGE_KEY]: cards });
+  if (!opts.skipSyncQueue) queueSync();
 }
 
 /** @param {{ title: string, url: string }} input */
@@ -139,6 +165,8 @@ export async function addCard({ title, url }) {
   if (existing) {
     return { card: existing, created: false };
   }
+
+  await forgetDeletedUrl(normalizedUrl);
 
   const card = {
     id: crypto.randomUUID(),
@@ -157,13 +185,18 @@ export async function updateCard(id, patch) {
   const index = cards.findIndex((c) => c.id === id);
   if (index < 0) throw new Error("卡片不存在");
 
-  const next = { ...cards[index] };
+  const prev = cards[index];
+  const next = { ...prev };
   if (typeof patch.title === "string") {
     next.title = patch.title.trim() || "未命名";
   }
   if (typeof patch.url === "string") {
     const normalizedUrl = normalizeUrl(patch.url);
     if (!normalizedUrl) throw new Error("网址无效");
+    if (!urlsEqual(prev.url, normalizedUrl)) {
+      await rememberDeletedUrl(prev.url);
+      await forgetDeletedUrl(normalizedUrl);
+    }
     next.url = normalizedUrl;
   }
   cards[index] = next;
@@ -174,6 +207,8 @@ export async function updateCard(id, patch) {
 /** @param {string} id */
 export async function removeCard(id) {
   const cards = await getCards();
+  const target = cards.find((c) => c.id === id);
+  if (target) await rememberDeletedUrl(target.url);
   await saveCards(cards.filter((c) => c.id !== id));
 }
 
@@ -433,6 +468,8 @@ export async function parseShareUrl(raw) {
  */
 export async function importCards(incoming, mode) {
   if (mode === "replace") {
+    await clearDeletedUrls();
+    for (const card of incoming) await forgetDeletedUrl(card.url);
     await saveCards(incoming);
     return { total: incoming.length, added: incoming.length, skipped: 0 };
   }
@@ -446,6 +483,7 @@ export async function importCards(incoming, mode) {
       skipped += 1;
       continue;
     }
+    await forgetDeletedUrl(card.url);
     next.push({
       ...card,
       id: crypto.randomUUID(),
@@ -455,4 +493,511 @@ export async function importCards(incoming, mode) {
   }
   await saveCards(next);
   return { total: next.length, added, skipped };
+}
+
+/* ---------- Cloud sync (anonymous sync code) ---------- */
+
+/** @returns {SyncConfig} */
+function emptySyncConfig() {
+  return {
+    enabled: false,
+    syncId: "",
+    secret: "",
+    lastSyncedAt: null,
+    lastRevision: 0,
+    lastError: null,
+  };
+}
+
+/** @returns {Promise<SyncConfig>} */
+export async function getSyncConfig() {
+  const data = await chrome.storage.local.get(SYNC_CONFIG_KEY);
+  const raw = data[SYNC_CONFIG_KEY];
+  if (!raw || typeof raw !== "object") return emptySyncConfig();
+  return {
+    enabled: Boolean(raw.enabled),
+    syncId: typeof raw.syncId === "string" ? raw.syncId : "",
+    secret: typeof raw.secret === "string" ? raw.secret : "",
+    lastSyncedAt:
+      typeof raw.lastSyncedAt === "number" && Number.isFinite(raw.lastSyncedAt)
+        ? raw.lastSyncedAt
+        : null,
+    lastRevision:
+      typeof raw.lastRevision === "number" && Number.isFinite(raw.lastRevision)
+        ? raw.lastRevision
+        : 0,
+    lastError: typeof raw.lastError === "string" ? raw.lastError : null,
+  };
+}
+
+/** @param {Partial<SyncConfig>} patch */
+export async function setSyncConfig(patch) {
+  const prev = await getSyncConfig();
+  const next = { ...prev, ...patch };
+  await chrome.storage.local.set({ [SYNC_CONFIG_KEY]: next });
+  return next;
+}
+
+/** @returns {Promise<string[]>} */
+async function getDeletedUrls() {
+  const data = await chrome.storage.local.get(DELETED_URLS_KEY);
+  const list = data[DELETED_URLS_KEY];
+  return Array.isArray(list)
+    ? list.filter((u) => typeof u === "string" && u)
+    : [];
+}
+
+/** @param {string[]} urls */
+async function saveDeletedUrls(urls) {
+  const trimmed = urls.slice(-DELETED_URLS_LIMIT);
+  await chrome.storage.local.set({ [DELETED_URLS_KEY]: trimmed });
+}
+
+async function clearDeletedUrls() {
+  await chrome.storage.local.set({ [DELETED_URLS_KEY]: [] });
+}
+
+/** @param {string} url */
+async function rememberDeletedUrl(url) {
+  const key = normalizeUrl(url) || url;
+  if (!key) return;
+  const list = await getDeletedUrls();
+  if (list.some((u) => urlsEqual(u, key))) return;
+  list.push(key);
+  await saveDeletedUrls(list);
+}
+
+/** @param {string} url */
+async function forgetDeletedUrl(url) {
+  const key = normalizeUrl(url) || url;
+  if (!key) return;
+  const list = await getDeletedUrls();
+  const next = list.filter((u) => !urlsEqual(u, key));
+  if (next.length !== list.length) await saveDeletedUrls(next);
+}
+
+/** @param {Uint8Array} bytes */
+function bytesToHex(bytes) {
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** @param {string} hex */
+function hexToBytes(hex) {
+  const clean = hex.toLowerCase();
+  if (!/^[a-f0-9]+$/.test(clean) || clean.length % 2) {
+    throw new Error("无效的同步码");
+  }
+  const out = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < out.length; i += 1) {
+    out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+/**
+ * Encode sync id + secret into one copyable code.
+ * @param {string} syncId hex
+ * @param {string} secret hex
+ */
+export function formatSyncCode(syncId, secret) {
+  const idBytes = hexToBytes(syncId);
+  const secretBytes = hexToBytes(secret);
+  if (idBytes.length !== SYNC_ID_BYTES || secretBytes.length !== SYNC_SECRET_BYTES) {
+    throw new Error("同步码内部格式错误");
+  }
+  const packed = new Uint8Array(SYNC_ID_BYTES + SYNC_SECRET_BYTES);
+  packed.set(idBytes, 0);
+  packed.set(secretBytes, SYNC_ID_BYTES);
+  return `${SYNC_CODE_PREFIX}${bytesToBase64Url(packed)}`;
+}
+
+/**
+ * @param {string} raw
+ * @returns {{ syncId: string, secret: string }}
+ */
+export function parseSyncCode(raw) {
+  let text = (raw || "").trim().replace(/\s+/g, "");
+  if (!text) throw new Error("请输入同步码");
+
+  if (!text.startsWith(SYNC_CODE_PREFIX)) {
+    // Allow pasting without prefix if it looks like base64url body
+    if (/^[A-Za-z0-9_-]+$/.test(text) && text.length > 20) {
+      text = `${SYNC_CODE_PREFIX}${text}`;
+    } else {
+      throw new Error("同步码格式无效，应以 WUGE1. 开头");
+    }
+  }
+
+  const body = text.slice(SYNC_CODE_PREFIX.length);
+  let packed;
+  try {
+    packed = base64UrlToBytes(body);
+  } catch {
+    throw new Error("同步码无法解析");
+  }
+  if (packed.length !== SYNC_ID_BYTES + SYNC_SECRET_BYTES) {
+    throw new Error("同步码长度不正确");
+  }
+  return {
+    syncId: bytesToHex(packed.subarray(0, SYNC_ID_BYTES)),
+    secret: bytesToHex(packed.subarray(SYNC_ID_BYTES)),
+  };
+}
+
+/** @returns {Promise<{ syncId: string, secret: string, code: string }>} */
+export async function createSyncSession() {
+  const idBytes = crypto.getRandomValues(new Uint8Array(SYNC_ID_BYTES));
+  const secretBytes = crypto.getRandomValues(new Uint8Array(SYNC_SECRET_BYTES));
+  const syncId = bytesToHex(idBytes);
+  const secret = bytesToHex(secretBytes);
+  const code = formatSyncCode(syncId, secret);
+  await setSyncConfig({
+    enabled: true,
+    syncId,
+    secret,
+    lastSyncedAt: null,
+    lastRevision: 0,
+    lastError: null,
+  });
+  await syncNow({ force: true });
+  return { syncId, secret, code };
+}
+
+/** @param {string} rawCode */
+export async function bindSyncCode(rawCode) {
+  const { syncId, secret } = parseSyncCode(rawCode);
+  await setSyncConfig({
+    enabled: true,
+    syncId,
+    secret,
+    lastSyncedAt: null,
+    lastRevision: 0,
+    lastError: null,
+  });
+  const result = await syncNow({ force: true });
+  return result;
+}
+
+export async function disableSync() {
+  await setSyncConfig({
+    enabled: false,
+    syncId: "",
+    secret: "",
+    lastSyncedAt: null,
+    lastRevision: 0,
+    lastError: null,
+  });
+}
+
+/** @param {string} secretHex */
+async function importAesKey(secretHex) {
+  const keyBytes = hexToBytes(secretHex);
+  return crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, [
+    "encrypt",
+    "decrypt",
+  ]);
+}
+
+/**
+ * @param {object} payload
+ * @param {string} secretHex
+ */
+async function encryptPayload(payload, secretHex) {
+  const key = await importAesKey(secretHex);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const plain = new TextEncoder().encode(JSON.stringify(payload));
+  const cipherBuf = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plain);
+  const cipher = new Uint8Array(cipherBuf);
+  const packed = new Uint8Array(iv.length + cipher.length);
+  packed.set(iv, 0);
+  packed.set(cipher, iv.length);
+  return bytesToBase64Url(packed);
+}
+
+/**
+ * @param {string} ciphertext
+ * @param {string} secretHex
+ */
+async function decryptPayload(ciphertext, secretHex) {
+  const packed = base64UrlToBytes(ciphertext);
+  if (packed.length < 13) throw new Error("远端数据损坏");
+  const iv = packed.subarray(0, 12);
+  const cipher = packed.subarray(12);
+  const key = await importAesKey(secretHex);
+  try {
+    const plainBuf = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv },
+      key,
+      cipher
+    );
+    return JSON.parse(new TextDecoder().decode(plainBuf));
+  } catch {
+    throw new Error("解密失败：同步码可能不正确");
+  }
+}
+
+/**
+ * Merge local + remote cards; apply deleted URL tombstones.
+ * Local order wins; remote-only cards append.
+ * @param {Card[]} local
+ * @param {Card[]} remote
+ * @param {string[]} deletedUrls
+ * @returns {Card[]}
+ */
+export function mergeCardsForSync(local, remote, deletedUrls = []) {
+  /** @type {Card[]} */
+  const merged = [];
+
+  const isDeleted = (url) => deletedUrls.some((d) => urlsEqual(d, url));
+
+  for (const card of local) {
+    if (isDeleted(card.url)) continue;
+    merged.push(card);
+  }
+
+  for (const card of remote) {
+    if (isDeleted(card.url)) continue;
+    const idx = merged.findIndex((c) => urlsEqual(c.url, card.url));
+    if (idx < 0) {
+      merged.push({
+        id: crypto.randomUUID(),
+        title: (card.title || hostnameOf(card.url)).trim() || "未命名",
+        url: card.url,
+        createdAt:
+          typeof card.createdAt === "number" && Number.isFinite(card.createdAt)
+            ? card.createdAt
+            : Date.now(),
+      });
+      continue;
+    }
+    const cur = merged[idx];
+    const remoteNewer =
+      (card.createdAt || 0) > (cur.createdAt || 0) &&
+      (card.title || "").trim() &&
+      card.title !== cur.title;
+    if (remoteNewer) {
+      merged[idx] = {
+        ...cur,
+        title: card.title.trim() || cur.title,
+        createdAt: cur.createdAt || card.createdAt || Date.now(),
+      };
+    }
+  }
+
+  return merged;
+}
+
+/**
+ * @param {Card[]} cards
+ * @param {string[]} deletedUrls
+ */
+function buildSyncPayload(cards, deletedUrls) {
+  return {
+    v: 1,
+    updatedAt: Date.now(),
+    cards: cards.map((c) => ({
+      title: c.title,
+      url: c.url,
+      createdAt: c.createdAt,
+    })),
+    deleted: deletedUrls.slice(-DELETED_URLS_LIMIT),
+  };
+}
+
+/**
+ * @param {unknown} payload
+ * @returns {{ cards: Card[], deleted: string[] }}
+ */
+function parseSyncPayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("远端数据格式无效");
+  }
+  const cardsRaw = Array.isArray(payload.cards) ? payload.cards : [];
+  /** @type {Card[]} */
+  const cards = [];
+  for (const item of cardsRaw) {
+    if (!item || typeof item !== "object") continue;
+    const url = normalizeUrl(String(item.url || ""));
+    if (!url) continue;
+    cards.push({
+      id: crypto.randomUUID(),
+      title: String(item.title || hostnameOf(url)).trim() || "未命名",
+      url,
+      createdAt:
+        typeof item.createdAt === "number" && Number.isFinite(item.createdAt)
+          ? item.createdAt
+          : Date.now(),
+    });
+  }
+  const deleted = Array.isArray(payload.deleted)
+    ? payload.deleted
+        .filter((u) => typeof u === "string" && u)
+        .map((u) => normalizeUrl(u) || u)
+    : [];
+  return { cards, deleted };
+}
+
+/** @param {string} syncId */
+function syncEndpoint(syncId) {
+  return `${SYNC_API_BASE}/v1/sync/${syncId}`;
+}
+
+/**
+ * @param {string} prefix
+ * @param {Response} res
+ */
+async function describeSyncHttpError(prefix, res) {
+  let detail = "";
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    try {
+      const body = await res.json();
+      if (body?.error) detail = `：${body.error}`;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (res.status === 404 || res.status === 502 || res.status === 503) {
+    return `${prefix}：同步服务暂时不可用，请稍后重试`;
+  }
+  if (res.status === 429) {
+    return `${prefix}：请求过于频繁，请稍后再试`;
+  }
+  return `${prefix}（${res.status}${detail}）`;
+}
+
+let syncInFlight = null;
+let syncTimer = null;
+let syncQueued = false;
+
+/** Debounced sync after local edits. */
+export function queueSync() {
+  syncQueued = true;
+  if (syncTimer) clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => {
+    syncTimer = null;
+    flushSyncQueue();
+  }, SYNC_QUEUE_MS);
+}
+
+function flushSyncQueue() {
+  if (syncInFlight) {
+    syncQueued = true;
+    return;
+  }
+  if (!syncQueued) return;
+  syncQueued = false;
+  syncNow().catch(() => {
+    /* lastError persisted in syncNow */
+  });
+}
+
+/**
+ * Pull → merge → save → push. Safe to call often; concurrent calls share one flight.
+ * @param {{ force?: boolean }} [opts]
+ */
+export async function syncNow(opts = {}) {
+  if (syncInFlight) {
+    syncQueued = true;
+    return syncInFlight;
+  }
+
+  syncInFlight = (async () => {
+    const config = await getSyncConfig();
+    if (!config.enabled || !config.syncId || !config.secret) {
+      if (opts.force) throw new Error("尚未开启同步");
+      return { skipped: true };
+    }
+
+    try {
+      let revision = 0;
+      let remoteCards = [];
+      let remoteDeleted = [];
+
+      for (let attempt = 0; attempt < SYNC_MAX_RETRIES; attempt += 1) {
+        const getRes = await fetch(syncEndpoint(config.syncId), {
+          method: "GET",
+          credentials: "omit",
+          cache: "no-store",
+        });
+        if (!getRes.ok) {
+          throw new Error(await describeSyncHttpError("同步拉取失败", getRes));
+        }
+        let getBody;
+        try {
+          getBody = await getRes.json();
+        } catch {
+          throw new Error("同步服务响应异常，请稍后重试");
+        }
+        revision = Number(getBody.revision) || 0;
+
+        if (getBody.ciphertext) {
+          const payload = await decryptPayload(getBody.ciphertext, config.secret);
+          const parsed = parseSyncPayload(payload);
+          remoteCards = parsed.cards;
+          remoteDeleted = parsed.deleted;
+        } else {
+          remoteCards = [];
+          remoteDeleted = [];
+        }
+
+        const localCards = await getCards();
+        const localDeleted = await getDeletedUrls();
+        const deletedUrls = [...localDeleted];
+        for (const url of remoteDeleted) {
+          if (!deletedUrls.some((d) => urlsEqual(d, url))) deletedUrls.push(url);
+        }
+
+        const merged = mergeCardsForSync(localCards, remoteCards, deletedUrls);
+        await saveDeletedUrls(deletedUrls);
+        await saveCards(merged, { skipSyncQueue: true });
+
+        const ciphertext = await encryptPayload(
+          buildSyncPayload(merged, deletedUrls),
+          config.secret
+        );
+
+        const putRes = await fetch(syncEndpoint(config.syncId), {
+          method: "PUT",
+          credentials: "omit",
+          headers: {
+            "Content-Type": "application/json",
+            "If-Match": `"${revision}"`,
+          },
+          body: JSON.stringify({ ciphertext, revision }),
+        });
+
+        if (putRes.status === 409) {
+          continue;
+        }
+        if (!putRes.ok) {
+          throw new Error(await describeSyncHttpError("同步上传失败", putRes));
+        }
+
+        const putBody = await putRes.json();
+        const nextRevision = Number(putBody.revision) || revision + 1;
+        await setSyncConfig({
+          lastSyncedAt: Date.now(),
+          lastRevision: nextRevision,
+          lastError: null,
+        });
+        return {
+          ok: true,
+          revision: nextRevision,
+          total: merged.length,
+        };
+      }
+
+      throw new Error("同步冲突过多，请稍后重试");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "同步失败";
+      await setSyncConfig({ lastError: message });
+      throw err instanceof Error ? err : new Error(message);
+    } finally {
+      syncInFlight = null;
+      if (syncQueued) flushSyncQueue();
+    }
+  })();
+
+  return syncInFlight;
 }

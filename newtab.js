@@ -11,6 +11,7 @@ import {
   removeCard,
   removeSearchHistory,
   reorderCards,
+  syncNow,
   updateCard,
 } from "./shared.js";
 
@@ -992,6 +993,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 render();
+syncNow().catch(() => {});
 
 const params = new URLSearchParams(location.search);
 if (params.get("add") === "1") {

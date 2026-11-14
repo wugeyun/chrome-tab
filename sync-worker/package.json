@@ -1,0 +1,14 @@
+{
+  "name": "wuge-newtab-sync",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Anonymous encrypted card sync for 武哥新标签页",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "kv:create": "wrangler kv namespace create SYNC_KV"
+  },
+  "devDependencies": {
+    "wrangler": "^4.45.0"
+  }
+}
